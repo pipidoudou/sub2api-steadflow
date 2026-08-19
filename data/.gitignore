@@ -1,0 +1,6 @@
+# Local runtime data only.
+# Keep this directory in the tree for documentation, but do not track
+# local downloads, manifests, or other generated files by default.
+*
+!.gitignore
+!README.md

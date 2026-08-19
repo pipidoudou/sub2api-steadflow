@@ -55,6 +55,62 @@ func (_c *PaymentOrderCreate) SetNillableUserNotes(v *string) *PaymentOrderCreat
 	return _c
 }
 
+// SetDistributorEmail sets the "distributor_email" field.
+func (_c *PaymentOrderCreate) SetDistributorEmail(v string) *PaymentOrderCreate {
+	_c.mutation.SetDistributorEmail(v)
+	return _c
+}
+
+// SetNillableDistributorEmail sets the "distributor_email" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableDistributorEmail(v *string) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetDistributorEmail(*v)
+	}
+	return _c
+}
+
+// SetExternalUserID sets the "external_user_id" field.
+func (_c *PaymentOrderCreate) SetExternalUserID(v string) *PaymentOrderCreate {
+	_c.mutation.SetExternalUserID(v)
+	return _c
+}
+
+// SetNillableExternalUserID sets the "external_user_id" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableExternalUserID(v *string) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetExternalUserID(*v)
+	}
+	return _c
+}
+
+// SetCreatedUserID sets the "created_user_id" field.
+func (_c *PaymentOrderCreate) SetCreatedUserID(v int64) *PaymentOrderCreate {
+	_c.mutation.SetCreatedUserID(v)
+	return _c
+}
+
+// SetNillableCreatedUserID sets the "created_user_id" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableCreatedUserID(v *int64) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetCreatedUserID(*v)
+	}
+	return _c
+}
+
+// SetDistributorID sets the "distributor_id" field.
+func (_c *PaymentOrderCreate) SetDistributorID(v int64) *PaymentOrderCreate {
+	_c.mutation.SetDistributorID(v)
+	return _c
+}
+
+// SetNillableDistributorID sets the "distributor_id" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableDistributorID(v *int64) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetDistributorID(*v)
+	}
+	return _c
+}
+
 // SetAmount sets the "amount" field.
 func (_c *PaymentOrderCreate) SetAmount(v float64) *PaymentOrderCreate {
 	_c.mutation.SetAmount(v)
@@ -568,6 +624,16 @@ func (_c *PaymentOrderCreate) check() error {
 			return &ValidationError{Name: "user_name", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.user_name": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.DistributorEmail(); ok {
+		if err := paymentorder.DistributorEmailValidator(v); err != nil {
+			return &ValidationError{Name: "distributor_email", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.distributor_email": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.ExternalUserID(); ok {
+		if err := paymentorder.ExternalUserIDValidator(v); err != nil {
+			return &ValidationError{Name: "external_user_id", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.external_user_id": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.Amount(); !ok {
 		return &ValidationError{Name: "amount", err: errors.New(`ent: missing required field "PaymentOrder.amount"`)}
 	}
@@ -712,6 +778,22 @@ func (_c *PaymentOrderCreate) createSpec() (*PaymentOrder, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.UserNotes(); ok {
 		_spec.SetField(paymentorder.FieldUserNotes, field.TypeString, value)
 		_node.UserNotes = &value
+	}
+	if value, ok := _c.mutation.DistributorEmail(); ok {
+		_spec.SetField(paymentorder.FieldDistributorEmail, field.TypeString, value)
+		_node.DistributorEmail = &value
+	}
+	if value, ok := _c.mutation.ExternalUserID(); ok {
+		_spec.SetField(paymentorder.FieldExternalUserID, field.TypeString, value)
+		_node.ExternalUserID = &value
+	}
+	if value, ok := _c.mutation.CreatedUserID(); ok {
+		_spec.SetField(paymentorder.FieldCreatedUserID, field.TypeInt64, value)
+		_node.CreatedUserID = &value
+	}
+	if value, ok := _c.mutation.DistributorID(); ok {
+		_spec.SetField(paymentorder.FieldDistributorID, field.TypeInt64, value)
+		_node.DistributorID = &value
 	}
 	if value, ok := _c.mutation.Amount(); ok {
 		_spec.SetField(paymentorder.FieldAmount, field.TypeFloat64, value)
@@ -973,6 +1055,90 @@ func (u *PaymentOrderUpsert) UpdateUserNotes() *PaymentOrderUpsert {
 // ClearUserNotes clears the value of the "user_notes" field.
 func (u *PaymentOrderUpsert) ClearUserNotes() *PaymentOrderUpsert {
 	u.SetNull(paymentorder.FieldUserNotes)
+	return u
+}
+
+// SetDistributorEmail sets the "distributor_email" field.
+func (u *PaymentOrderUpsert) SetDistributorEmail(v string) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldDistributorEmail, v)
+	return u
+}
+
+// UpdateDistributorEmail sets the "distributor_email" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateDistributorEmail() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldDistributorEmail)
+	return u
+}
+
+// ClearDistributorEmail clears the value of the "distributor_email" field.
+func (u *PaymentOrderUpsert) ClearDistributorEmail() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldDistributorEmail)
+	return u
+}
+
+// SetExternalUserID sets the "external_user_id" field.
+func (u *PaymentOrderUpsert) SetExternalUserID(v string) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldExternalUserID, v)
+	return u
+}
+
+// UpdateExternalUserID sets the "external_user_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateExternalUserID() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldExternalUserID)
+	return u
+}
+
+// ClearExternalUserID clears the value of the "external_user_id" field.
+func (u *PaymentOrderUpsert) ClearExternalUserID() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldExternalUserID)
+	return u
+}
+
+// SetCreatedUserID sets the "created_user_id" field.
+func (u *PaymentOrderUpsert) SetCreatedUserID(v int64) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldCreatedUserID, v)
+	return u
+}
+
+// UpdateCreatedUserID sets the "created_user_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateCreatedUserID() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldCreatedUserID)
+	return u
+}
+
+// AddCreatedUserID adds v to the "created_user_id" field.
+func (u *PaymentOrderUpsert) AddCreatedUserID(v int64) *PaymentOrderUpsert {
+	u.Add(paymentorder.FieldCreatedUserID, v)
+	return u
+}
+
+// ClearCreatedUserID clears the value of the "created_user_id" field.
+func (u *PaymentOrderUpsert) ClearCreatedUserID() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldCreatedUserID)
+	return u
+}
+
+// SetDistributorID sets the "distributor_id" field.
+func (u *PaymentOrderUpsert) SetDistributorID(v int64) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldDistributorID, v)
+	return u
+}
+
+// UpdateDistributorID sets the "distributor_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateDistributorID() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldDistributorID)
+	return u
+}
+
+// AddDistributorID adds v to the "distributor_id" field.
+func (u *PaymentOrderUpsert) AddDistributorID(v int64) *PaymentOrderUpsert {
+	u.Add(paymentorder.FieldDistributorID, v)
+	return u
+}
+
+// ClearDistributorID clears the value of the "distributor_id" field.
+func (u *PaymentOrderUpsert) ClearDistributorID() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldDistributorID)
 	return u
 }
 
@@ -1645,6 +1811,104 @@ func (u *PaymentOrderUpsertOne) UpdateUserNotes() *PaymentOrderUpsertOne {
 func (u *PaymentOrderUpsertOne) ClearUserNotes() *PaymentOrderUpsertOne {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.ClearUserNotes()
+	})
+}
+
+// SetDistributorEmail sets the "distributor_email" field.
+func (u *PaymentOrderUpsertOne) SetDistributorEmail(v string) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetDistributorEmail(v)
+	})
+}
+
+// UpdateDistributorEmail sets the "distributor_email" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateDistributorEmail() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateDistributorEmail()
+	})
+}
+
+// ClearDistributorEmail clears the value of the "distributor_email" field.
+func (u *PaymentOrderUpsertOne) ClearDistributorEmail() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearDistributorEmail()
+	})
+}
+
+// SetExternalUserID sets the "external_user_id" field.
+func (u *PaymentOrderUpsertOne) SetExternalUserID(v string) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetExternalUserID(v)
+	})
+}
+
+// UpdateExternalUserID sets the "external_user_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateExternalUserID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateExternalUserID()
+	})
+}
+
+// ClearExternalUserID clears the value of the "external_user_id" field.
+func (u *PaymentOrderUpsertOne) ClearExternalUserID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearExternalUserID()
+	})
+}
+
+// SetCreatedUserID sets the "created_user_id" field.
+func (u *PaymentOrderUpsertOne) SetCreatedUserID(v int64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetCreatedUserID(v)
+	})
+}
+
+// AddCreatedUserID adds v to the "created_user_id" field.
+func (u *PaymentOrderUpsertOne) AddCreatedUserID(v int64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddCreatedUserID(v)
+	})
+}
+
+// UpdateCreatedUserID sets the "created_user_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateCreatedUserID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateCreatedUserID()
+	})
+}
+
+// ClearCreatedUserID clears the value of the "created_user_id" field.
+func (u *PaymentOrderUpsertOne) ClearCreatedUserID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearCreatedUserID()
+	})
+}
+
+// SetDistributorID sets the "distributor_id" field.
+func (u *PaymentOrderUpsertOne) SetDistributorID(v int64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetDistributorID(v)
+	})
+}
+
+// AddDistributorID adds v to the "distributor_id" field.
+func (u *PaymentOrderUpsertOne) AddDistributorID(v int64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddDistributorID(v)
+	})
+}
+
+// UpdateDistributorID sets the "distributor_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateDistributorID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateDistributorID()
+	})
+}
+
+// ClearDistributorID clears the value of the "distributor_id" field.
+func (u *PaymentOrderUpsertOne) ClearDistributorID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearDistributorID()
 	})
 }
 
@@ -2577,6 +2841,104 @@ func (u *PaymentOrderUpsertBulk) UpdateUserNotes() *PaymentOrderUpsertBulk {
 func (u *PaymentOrderUpsertBulk) ClearUserNotes() *PaymentOrderUpsertBulk {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.ClearUserNotes()
+	})
+}
+
+// SetDistributorEmail sets the "distributor_email" field.
+func (u *PaymentOrderUpsertBulk) SetDistributorEmail(v string) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetDistributorEmail(v)
+	})
+}
+
+// UpdateDistributorEmail sets the "distributor_email" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateDistributorEmail() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateDistributorEmail()
+	})
+}
+
+// ClearDistributorEmail clears the value of the "distributor_email" field.
+func (u *PaymentOrderUpsertBulk) ClearDistributorEmail() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearDistributorEmail()
+	})
+}
+
+// SetExternalUserID sets the "external_user_id" field.
+func (u *PaymentOrderUpsertBulk) SetExternalUserID(v string) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetExternalUserID(v)
+	})
+}
+
+// UpdateExternalUserID sets the "external_user_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateExternalUserID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateExternalUserID()
+	})
+}
+
+// ClearExternalUserID clears the value of the "external_user_id" field.
+func (u *PaymentOrderUpsertBulk) ClearExternalUserID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearExternalUserID()
+	})
+}
+
+// SetCreatedUserID sets the "created_user_id" field.
+func (u *PaymentOrderUpsertBulk) SetCreatedUserID(v int64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetCreatedUserID(v)
+	})
+}
+
+// AddCreatedUserID adds v to the "created_user_id" field.
+func (u *PaymentOrderUpsertBulk) AddCreatedUserID(v int64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddCreatedUserID(v)
+	})
+}
+
+// UpdateCreatedUserID sets the "created_user_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateCreatedUserID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateCreatedUserID()
+	})
+}
+
+// ClearCreatedUserID clears the value of the "created_user_id" field.
+func (u *PaymentOrderUpsertBulk) ClearCreatedUserID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearCreatedUserID()
+	})
+}
+
+// SetDistributorID sets the "distributor_id" field.
+func (u *PaymentOrderUpsertBulk) SetDistributorID(v int64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetDistributorID(v)
+	})
+}
+
+// AddDistributorID adds v to the "distributor_id" field.
+func (u *PaymentOrderUpsertBulk) AddDistributorID(v int64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddDistributorID(v)
+	})
+}
+
+// UpdateDistributorID sets the "distributor_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateDistributorID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateDistributorID()
+	})
+}
+
+// ClearDistributorID clears the value of the "distributor_id" field.
+func (u *PaymentOrderUpsertBulk) ClearDistributorID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearDistributorID()
 	})
 }
 

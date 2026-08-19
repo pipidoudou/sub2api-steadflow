@@ -23,6 +23,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
 	"github.com/Wei-Shaw/sub2api/ent/compositemodelroute"
+	"github.com/Wei-Shaw/sub2api/ent/distributorbinding"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -44,6 +45,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
+	"github.com/Wei-Shaw/sub2api/ent/userapikey"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
@@ -509,6 +511,33 @@ func (f TraverseCompositeModelRoute) Traverse(ctx context.Context, q ent.Query) 
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.CompositeModelRouteQuery", q)
+}
+
+// The DistributorBindingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type DistributorBindingFunc func(context.Context, *ent.DistributorBindingQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f DistributorBindingFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.DistributorBindingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.DistributorBindingQuery", q)
+}
+
+// The TraverseDistributorBinding type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseDistributorBinding func(context.Context, *ent.DistributorBindingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseDistributorBinding) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseDistributorBinding) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.DistributorBindingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.DistributorBindingQuery", q)
 }
 
 // The ErrorPassthroughRuleFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1024,6 +1053,33 @@ func (f TraverseUser) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.UserQuery", q)
 }
 
+// The UserAPIKeyFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UserAPIKeyFunc func(context.Context, *ent.UserAPIKeyQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f UserAPIKeyFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.UserAPIKeyQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.UserAPIKeyQuery", q)
+}
+
+// The TraverseUserAPIKey type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUserAPIKey func(context.Context, *ent.UserAPIKeyQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUserAPIKey) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUserAPIKey) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.UserAPIKeyQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.UserAPIKeyQuery", q)
+}
+
 // The UserAllowedGroupFunc type is an adapter to allow the use of ordinary function as a Querier.
 type UserAllowedGroupFunc func(context.Context, *ent.UserAllowedGroupQuery) (ent.Value, error)
 
@@ -1192,6 +1248,8 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.ChannelMonitorRequestTemplateQuery, predicate.ChannelMonitorRequestTemplate, channelmonitorrequesttemplate.OrderOption]{typ: ent.TypeChannelMonitorRequestTemplate, tq: q}, nil
 	case *ent.CompositeModelRouteQuery:
 		return &query[*ent.CompositeModelRouteQuery, predicate.CompositeModelRoute, compositemodelroute.OrderOption]{typ: ent.TypeCompositeModelRoute, tq: q}, nil
+	case *ent.DistributorBindingQuery:
+		return &query[*ent.DistributorBindingQuery, predicate.DistributorBinding, distributorbinding.OrderOption]{typ: ent.TypeDistributorBinding, tq: q}, nil
 	case *ent.ErrorPassthroughRuleQuery:
 		return &query[*ent.ErrorPassthroughRuleQuery, predicate.ErrorPassthroughRule, errorpassthroughrule.OrderOption]{typ: ent.TypeErrorPassthroughRule, tq: q}, nil
 	case *ent.GroupQuery:
@@ -1230,6 +1288,8 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.UsageLogQuery, predicate.UsageLog, usagelog.OrderOption]{typ: ent.TypeUsageLog, tq: q}, nil
 	case *ent.UserQuery:
 		return &query[*ent.UserQuery, predicate.User, user.OrderOption]{typ: ent.TypeUser, tq: q}, nil
+	case *ent.UserAPIKeyQuery:
+		return &query[*ent.UserAPIKeyQuery, predicate.UserAPIKey, userapikey.OrderOption]{typ: ent.TypeUserAPIKey, tq: q}, nil
 	case *ent.UserAllowedGroupQuery:
 		return &query[*ent.UserAllowedGroupQuery, predicate.UserAllowedGroup, userallowedgroup.OrderOption]{typ: ent.TypeUserAllowedGroup, tq: q}, nil
 	case *ent.UserAttributeDefinitionQuery:

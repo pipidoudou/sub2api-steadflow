@@ -27,6 +27,14 @@ type PaymentOrder struct {
 	UserName string `json:"user_name,omitempty"`
 	// UserNotes holds the value of the "user_notes" field.
 	UserNotes *string `json:"user_notes,omitempty"`
+	// DistributorEmail holds the value of the "distributor_email" field.
+	DistributorEmail *string `json:"distributor_email,omitempty"`
+	// ExternalUserID holds the value of the "external_user_id" field.
+	ExternalUserID *string `json:"external_user_id,omitempty"`
+	// CreatedUserID holds the value of the "created_user_id" field.
+	CreatedUserID *int64 `json:"created_user_id,omitempty"`
+	// DistributorID holds the value of the "distributor_id" field.
+	DistributorID *int64 `json:"distributor_id,omitempty"`
 	// Amount holds the value of the "amount" field.
 	Amount float64 `json:"amount,omitempty"`
 	// PayAmount holds the value of the "pay_amount" field.
@@ -134,9 +142,9 @@ func (*PaymentOrder) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case paymentorder.FieldAmount, paymentorder.FieldPayAmount, paymentorder.FieldFeeRate, paymentorder.FieldRefundAmount:
 			values[i] = new(sql.NullFloat64)
-		case paymentorder.FieldID, paymentorder.FieldUserID, paymentorder.FieldPlanID, paymentorder.FieldSubscriptionGroupID, paymentorder.FieldSubscriptionDays:
+		case paymentorder.FieldID, paymentorder.FieldUserID, paymentorder.FieldCreatedUserID, paymentorder.FieldDistributorID, paymentorder.FieldPlanID, paymentorder.FieldSubscriptionGroupID, paymentorder.FieldSubscriptionDays:
 			values[i] = new(sql.NullInt64)
-		case paymentorder.FieldUserEmail, paymentorder.FieldUserName, paymentorder.FieldUserNotes, paymentorder.FieldRechargeCode, paymentorder.FieldOutTradeNo, paymentorder.FieldPaymentType, paymentorder.FieldPaymentTradeNo, paymentorder.FieldPayURL, paymentorder.FieldQrCode, paymentorder.FieldQrCodeImg, paymentorder.FieldOrderType, paymentorder.FieldProviderInstanceID, paymentorder.FieldProviderKey, paymentorder.FieldStatus, paymentorder.FieldRefundReason, paymentorder.FieldRefundRequestReason, paymentorder.FieldRefundRequestedBy, paymentorder.FieldFailedReason, paymentorder.FieldClientIP, paymentorder.FieldSrcHost, paymentorder.FieldSrcURL:
+		case paymentorder.FieldUserEmail, paymentorder.FieldUserName, paymentorder.FieldUserNotes, paymentorder.FieldDistributorEmail, paymentorder.FieldExternalUserID, paymentorder.FieldRechargeCode, paymentorder.FieldOutTradeNo, paymentorder.FieldPaymentType, paymentorder.FieldPaymentTradeNo, paymentorder.FieldPayURL, paymentorder.FieldQrCode, paymentorder.FieldQrCodeImg, paymentorder.FieldOrderType, paymentorder.FieldProviderInstanceID, paymentorder.FieldProviderKey, paymentorder.FieldStatus, paymentorder.FieldRefundReason, paymentorder.FieldRefundRequestReason, paymentorder.FieldRefundRequestedBy, paymentorder.FieldFailedReason, paymentorder.FieldClientIP, paymentorder.FieldSrcHost, paymentorder.FieldSrcURL:
 			values[i] = new(sql.NullString)
 		case paymentorder.FieldRefundAt, paymentorder.FieldRefundRequestedAt, paymentorder.FieldExpiresAt, paymentorder.FieldPaidAt, paymentorder.FieldCompletedAt, paymentorder.FieldFailedAt, paymentorder.FieldCreatedAt, paymentorder.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -185,6 +193,34 @@ func (_m *PaymentOrder) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.UserNotes = new(string)
 				*_m.UserNotes = value.String
+			}
+		case paymentorder.FieldDistributorEmail:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field distributor_email", values[i])
+			} else if value.Valid {
+				_m.DistributorEmail = new(string)
+				*_m.DistributorEmail = value.String
+			}
+		case paymentorder.FieldExternalUserID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field external_user_id", values[i])
+			} else if value.Valid {
+				_m.ExternalUserID = new(string)
+				*_m.ExternalUserID = value.String
+			}
+		case paymentorder.FieldCreatedUserID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field created_user_id", values[i])
+			} else if value.Valid {
+				_m.CreatedUserID = new(int64)
+				*_m.CreatedUserID = value.Int64
+			}
+		case paymentorder.FieldDistributorID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field distributor_id", values[i])
+			} else if value.Valid {
+				_m.DistributorID = new(int64)
+				*_m.DistributorID = value.Int64
 			}
 		case paymentorder.FieldAmount:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -469,6 +505,26 @@ func (_m *PaymentOrder) String() string {
 	if v := _m.UserNotes; v != nil {
 		builder.WriteString("user_notes=")
 		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.DistributorEmail; v != nil {
+		builder.WriteString("distributor_email=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.ExternalUserID; v != nil {
+		builder.WriteString("external_user_id=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.CreatedUserID; v != nil {
+		builder.WriteString("created_user_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.DistributorID; v != nil {
+		builder.WriteString("distributor_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
 	builder.WriteString("amount=")

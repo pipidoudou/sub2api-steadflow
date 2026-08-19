@@ -91,6 +91,100 @@ func (_u *PaymentOrderUpdate) ClearUserNotes() *PaymentOrderUpdate {
 	return _u
 }
 
+// SetDistributorEmail sets the "distributor_email" field.
+func (_u *PaymentOrderUpdate) SetDistributorEmail(v string) *PaymentOrderUpdate {
+	_u.mutation.SetDistributorEmail(v)
+	return _u
+}
+
+// SetNillableDistributorEmail sets the "distributor_email" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableDistributorEmail(v *string) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetDistributorEmail(*v)
+	}
+	return _u
+}
+
+// ClearDistributorEmail clears the value of the "distributor_email" field.
+func (_u *PaymentOrderUpdate) ClearDistributorEmail() *PaymentOrderUpdate {
+	_u.mutation.ClearDistributorEmail()
+	return _u
+}
+
+// SetExternalUserID sets the "external_user_id" field.
+func (_u *PaymentOrderUpdate) SetExternalUserID(v string) *PaymentOrderUpdate {
+	_u.mutation.SetExternalUserID(v)
+	return _u
+}
+
+// SetNillableExternalUserID sets the "external_user_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableExternalUserID(v *string) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetExternalUserID(*v)
+	}
+	return _u
+}
+
+// ClearExternalUserID clears the value of the "external_user_id" field.
+func (_u *PaymentOrderUpdate) ClearExternalUserID() *PaymentOrderUpdate {
+	_u.mutation.ClearExternalUserID()
+	return _u
+}
+
+// SetCreatedUserID sets the "created_user_id" field.
+func (_u *PaymentOrderUpdate) SetCreatedUserID(v int64) *PaymentOrderUpdate {
+	_u.mutation.ResetCreatedUserID()
+	_u.mutation.SetCreatedUserID(v)
+	return _u
+}
+
+// SetNillableCreatedUserID sets the "created_user_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableCreatedUserID(v *int64) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetCreatedUserID(*v)
+	}
+	return _u
+}
+
+// AddCreatedUserID adds value to the "created_user_id" field.
+func (_u *PaymentOrderUpdate) AddCreatedUserID(v int64) *PaymentOrderUpdate {
+	_u.mutation.AddCreatedUserID(v)
+	return _u
+}
+
+// ClearCreatedUserID clears the value of the "created_user_id" field.
+func (_u *PaymentOrderUpdate) ClearCreatedUserID() *PaymentOrderUpdate {
+	_u.mutation.ClearCreatedUserID()
+	return _u
+}
+
+// SetDistributorID sets the "distributor_id" field.
+func (_u *PaymentOrderUpdate) SetDistributorID(v int64) *PaymentOrderUpdate {
+	_u.mutation.ResetDistributorID()
+	_u.mutation.SetDistributorID(v)
+	return _u
+}
+
+// SetNillableDistributorID sets the "distributor_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableDistributorID(v *int64) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetDistributorID(*v)
+	}
+	return _u
+}
+
+// AddDistributorID adds value to the "distributor_id" field.
+func (_u *PaymentOrderUpdate) AddDistributorID(v int64) *PaymentOrderUpdate {
+	_u.mutation.AddDistributorID(v)
+	return _u
+}
+
+// ClearDistributorID clears the value of the "distributor_id" field.
+func (_u *PaymentOrderUpdate) ClearDistributorID() *PaymentOrderUpdate {
+	_u.mutation.ClearDistributorID()
+	return _u
+}
+
 // SetAmount sets the "amount" field.
 func (_u *PaymentOrderUpdate) SetAmount(v float64) *PaymentOrderUpdate {
 	_u.mutation.ResetAmount()
@@ -778,6 +872,16 @@ func (_u *PaymentOrderUpdate) check() error {
 			return &ValidationError{Name: "user_name", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.user_name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.DistributorEmail(); ok {
+		if err := paymentorder.DistributorEmailValidator(v); err != nil {
+			return &ValidationError{Name: "distributor_email", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.distributor_email": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ExternalUserID(); ok {
+		if err := paymentorder.ExternalUserIDValidator(v); err != nil {
+			return &ValidationError{Name: "external_user_id", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.external_user_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.RechargeCode(); ok {
 		if err := paymentorder.RechargeCodeValidator(v); err != nil {
 			return &ValidationError{Name: "recharge_code", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.recharge_code": %w`, err)}
@@ -862,6 +966,36 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if _u.mutation.UserNotesCleared() {
 		_spec.ClearField(paymentorder.FieldUserNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.DistributorEmail(); ok {
+		_spec.SetField(paymentorder.FieldDistributorEmail, field.TypeString, value)
+	}
+	if _u.mutation.DistributorEmailCleared() {
+		_spec.ClearField(paymentorder.FieldDistributorEmail, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExternalUserID(); ok {
+		_spec.SetField(paymentorder.FieldExternalUserID, field.TypeString, value)
+	}
+	if _u.mutation.ExternalUserIDCleared() {
+		_spec.ClearField(paymentorder.FieldExternalUserID, field.TypeString)
+	}
+	if value, ok := _u.mutation.CreatedUserID(); ok {
+		_spec.SetField(paymentorder.FieldCreatedUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedUserID(); ok {
+		_spec.AddField(paymentorder.FieldCreatedUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedUserIDCleared() {
+		_spec.ClearField(paymentorder.FieldCreatedUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.DistributorID(); ok {
+		_spec.SetField(paymentorder.FieldDistributorID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedDistributorID(); ok {
+		_spec.AddField(paymentorder.FieldDistributorID, field.TypeInt64, value)
+	}
+	if _u.mutation.DistributorIDCleared() {
+		_spec.ClearField(paymentorder.FieldDistributorID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Amount(); ok {
 		_spec.SetField(paymentorder.FieldAmount, field.TypeFloat64, value)
@@ -1151,6 +1285,100 @@ func (_u *PaymentOrderUpdateOne) SetNillableUserNotes(v *string) *PaymentOrderUp
 // ClearUserNotes clears the value of the "user_notes" field.
 func (_u *PaymentOrderUpdateOne) ClearUserNotes() *PaymentOrderUpdateOne {
 	_u.mutation.ClearUserNotes()
+	return _u
+}
+
+// SetDistributorEmail sets the "distributor_email" field.
+func (_u *PaymentOrderUpdateOne) SetDistributorEmail(v string) *PaymentOrderUpdateOne {
+	_u.mutation.SetDistributorEmail(v)
+	return _u
+}
+
+// SetNillableDistributorEmail sets the "distributor_email" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableDistributorEmail(v *string) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetDistributorEmail(*v)
+	}
+	return _u
+}
+
+// ClearDistributorEmail clears the value of the "distributor_email" field.
+func (_u *PaymentOrderUpdateOne) ClearDistributorEmail() *PaymentOrderUpdateOne {
+	_u.mutation.ClearDistributorEmail()
+	return _u
+}
+
+// SetExternalUserID sets the "external_user_id" field.
+func (_u *PaymentOrderUpdateOne) SetExternalUserID(v string) *PaymentOrderUpdateOne {
+	_u.mutation.SetExternalUserID(v)
+	return _u
+}
+
+// SetNillableExternalUserID sets the "external_user_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableExternalUserID(v *string) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetExternalUserID(*v)
+	}
+	return _u
+}
+
+// ClearExternalUserID clears the value of the "external_user_id" field.
+func (_u *PaymentOrderUpdateOne) ClearExternalUserID() *PaymentOrderUpdateOne {
+	_u.mutation.ClearExternalUserID()
+	return _u
+}
+
+// SetCreatedUserID sets the "created_user_id" field.
+func (_u *PaymentOrderUpdateOne) SetCreatedUserID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.ResetCreatedUserID()
+	_u.mutation.SetCreatedUserID(v)
+	return _u
+}
+
+// SetNillableCreatedUserID sets the "created_user_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableCreatedUserID(v *int64) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetCreatedUserID(*v)
+	}
+	return _u
+}
+
+// AddCreatedUserID adds value to the "created_user_id" field.
+func (_u *PaymentOrderUpdateOne) AddCreatedUserID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.AddCreatedUserID(v)
+	return _u
+}
+
+// ClearCreatedUserID clears the value of the "created_user_id" field.
+func (_u *PaymentOrderUpdateOne) ClearCreatedUserID() *PaymentOrderUpdateOne {
+	_u.mutation.ClearCreatedUserID()
+	return _u
+}
+
+// SetDistributorID sets the "distributor_id" field.
+func (_u *PaymentOrderUpdateOne) SetDistributorID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.ResetDistributorID()
+	_u.mutation.SetDistributorID(v)
+	return _u
+}
+
+// SetNillableDistributorID sets the "distributor_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableDistributorID(v *int64) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetDistributorID(*v)
+	}
+	return _u
+}
+
+// AddDistributorID adds value to the "distributor_id" field.
+func (_u *PaymentOrderUpdateOne) AddDistributorID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.AddDistributorID(v)
+	return _u
+}
+
+// ClearDistributorID clears the value of the "distributor_id" field.
+func (_u *PaymentOrderUpdateOne) ClearDistributorID() *PaymentOrderUpdateOne {
+	_u.mutation.ClearDistributorID()
 	return _u
 }
 
@@ -1854,6 +2082,16 @@ func (_u *PaymentOrderUpdateOne) check() error {
 			return &ValidationError{Name: "user_name", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.user_name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.DistributorEmail(); ok {
+		if err := paymentorder.DistributorEmailValidator(v); err != nil {
+			return &ValidationError{Name: "distributor_email", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.distributor_email": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ExternalUserID(); ok {
+		if err := paymentorder.ExternalUserIDValidator(v); err != nil {
+			return &ValidationError{Name: "external_user_id", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.external_user_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.RechargeCode(); ok {
 		if err := paymentorder.RechargeCodeValidator(v); err != nil {
 			return &ValidationError{Name: "recharge_code", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.recharge_code": %w`, err)}
@@ -1955,6 +2193,36 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if _u.mutation.UserNotesCleared() {
 		_spec.ClearField(paymentorder.FieldUserNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.DistributorEmail(); ok {
+		_spec.SetField(paymentorder.FieldDistributorEmail, field.TypeString, value)
+	}
+	if _u.mutation.DistributorEmailCleared() {
+		_spec.ClearField(paymentorder.FieldDistributorEmail, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExternalUserID(); ok {
+		_spec.SetField(paymentorder.FieldExternalUserID, field.TypeString, value)
+	}
+	if _u.mutation.ExternalUserIDCleared() {
+		_spec.ClearField(paymentorder.FieldExternalUserID, field.TypeString)
+	}
+	if value, ok := _u.mutation.CreatedUserID(); ok {
+		_spec.SetField(paymentorder.FieldCreatedUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedUserID(); ok {
+		_spec.AddField(paymentorder.FieldCreatedUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedUserIDCleared() {
+		_spec.ClearField(paymentorder.FieldCreatedUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.DistributorID(); ok {
+		_spec.SetField(paymentorder.FieldDistributorID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedDistributorID(); ok {
+		_spec.AddField(paymentorder.FieldDistributorID, field.TypeInt64, value)
+	}
+	if _u.mutation.DistributorIDCleared() {
+		_spec.ClearField(paymentorder.FieldDistributorID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Amount(); ok {
 		_spec.SetField(paymentorder.FieldAmount, field.TypeFloat64, value)

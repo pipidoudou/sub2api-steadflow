@@ -41,6 +41,20 @@ func (PaymentOrder) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("distributor_email").
+			Optional().
+			Nillable().
+			MaxLen(255),
+		field.String("external_user_id").
+			Optional().
+			Nillable().
+			MaxLen(128),
+		field.Int64("created_user_id").
+			Optional().
+			Nillable(),
+		field.Int64("distributor_id").
+			Optional().
+			Nillable(),
 
 		// 金额信息
 		field.Float("amount").

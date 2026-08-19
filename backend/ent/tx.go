@@ -44,6 +44,8 @@ type Tx struct {
 	ChannelMonitorRequestTemplate *ChannelMonitorRequestTemplateClient
 	// CompositeModelRoute is the client for interacting with the CompositeModelRoute builders.
 	CompositeModelRoute *CompositeModelRouteClient
+	// DistributorBinding is the client for interacting with the DistributorBinding builders.
+	DistributorBinding *DistributorBindingClient
 	// ErrorPassthroughRule is the client for interacting with the ErrorPassthroughRule builders.
 	ErrorPassthroughRule *ErrorPassthroughRuleClient
 	// Group is the client for interacting with the Group builders.
@@ -82,6 +84,8 @@ type Tx struct {
 	UsageLog *UsageLogClient
 	// User is the client for interacting with the User builders.
 	User *UserClient
+	// UserAPIKey is the client for interacting with the UserAPIKey builders.
+	UserAPIKey *UserAPIKeyClient
 	// UserAllowedGroup is the client for interacting with the UserAllowedGroup builders.
 	UserAllowedGroup *UserAllowedGroupClient
 	// UserAttributeDefinition is the client for interacting with the UserAttributeDefinition builders.
@@ -238,6 +242,7 @@ func (tx *Tx) init() {
 	tx.ChannelMonitorHistory = NewChannelMonitorHistoryClient(tx.config)
 	tx.ChannelMonitorRequestTemplate = NewChannelMonitorRequestTemplateClient(tx.config)
 	tx.CompositeModelRoute = NewCompositeModelRouteClient(tx.config)
+	tx.DistributorBinding = NewDistributorBindingClient(tx.config)
 	tx.ErrorPassthroughRule = NewErrorPassthroughRuleClient(tx.config)
 	tx.Group = NewGroupClient(tx.config)
 	tx.IdempotencyRecord = NewIdempotencyRecordClient(tx.config)
@@ -257,6 +262,7 @@ func (tx *Tx) init() {
 	tx.UsageCleanupTask = NewUsageCleanupTaskClient(tx.config)
 	tx.UsageLog = NewUsageLogClient(tx.config)
 	tx.User = NewUserClient(tx.config)
+	tx.UserAPIKey = NewUserAPIKeyClient(tx.config)
 	tx.UserAllowedGroup = NewUserAllowedGroupClient(tx.config)
 	tx.UserAttributeDefinition = NewUserAttributeDefinitionClient(tx.config)
 	tx.UserAttributeValue = NewUserAttributeValueClient(tx.config)

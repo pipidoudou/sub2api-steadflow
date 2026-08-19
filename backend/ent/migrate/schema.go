@@ -863,6 +863,37 @@ var (
 			},
 		},
 	}
+	// DistributorBindingsColumns holds the columns for the "distributor_bindings" table.
+	DistributorBindingsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "distributor_id", Type: field.TypeString, Unique: true, Size: 64},
+		{Name: "name", Type: field.TypeString, Size: 128},
+		{Name: "token_hash", Type: field.TypeString, Unique: true, Size: 128},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "contact_email", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "expires_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// DistributorBindingsTable holds the schema information for the "distributor_bindings" table.
+	DistributorBindingsTable = &schema.Table{
+		Name:       "distributor_bindings",
+		Columns:    DistributorBindingsColumns,
+		PrimaryKey: []*schema.Column{DistributorBindingsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "distributorbinding_enabled",
+				Unique:  false,
+				Columns: []*schema.Column{DistributorBindingsColumns[4]},
+			},
+			{
+				Name:    "distributorbinding_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{DistributorBindingsColumns[7]},
+			},
+		},
+	}
 	// ErrorPassthroughRulesColumns holds the columns for the "error_passthrough_rules" table.
 	ErrorPassthroughRulesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1121,6 +1152,10 @@ var (
 		{Name: "user_email", Type: field.TypeString, Size: 255},
 		{Name: "user_name", Type: field.TypeString, Size: 100},
 		{Name: "user_notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "distributor_email", Type: field.TypeString, Nullable: true, Size: 255},
+		{Name: "external_user_id", Type: field.TypeString, Nullable: true, Size: 128},
+		{Name: "created_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "distributor_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "amount", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,2)"}},
 		{Name: "pay_amount", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,2)"}},
 		{Name: "fee_rate", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
@@ -1166,7 +1201,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "payment_orders_users_payment_orders",
-				Columns:    []*schema.Column{PaymentOrdersColumns[39]},
+				Columns:    []*schema.Column{PaymentOrdersColumns[43]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1175,7 +1210,7 @@ var (
 			{
 				Name:    "paymentorder_out_trade_no",
 				Unique:  true,
-				Columns: []*schema.Column{PaymentOrdersColumns[8]},
+				Columns: []*schema.Column{PaymentOrdersColumns[12]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "out_trade_no <> ''",
 				},
@@ -1183,37 +1218,37 @@ var (
 			{
 				Name:    "paymentorder_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[39]},
+				Columns: []*schema.Column{PaymentOrdersColumns[43]},
 			},
 			{
 				Name:    "paymentorder_status",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[21]},
+				Columns: []*schema.Column{PaymentOrdersColumns[25]},
 			},
 			{
 				Name:    "paymentorder_expires_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[29]},
+				Columns: []*schema.Column{PaymentOrdersColumns[33]},
 			},
 			{
 				Name:    "paymentorder_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[37]},
+				Columns: []*schema.Column{PaymentOrdersColumns[41]},
 			},
 			{
 				Name:    "paymentorder_paid_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[30]},
+				Columns: []*schema.Column{PaymentOrdersColumns[34]},
 			},
 			{
 				Name:    "paymentorder_payment_type_paid_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[9], PaymentOrdersColumns[30]},
+				Columns: []*schema.Column{PaymentOrdersColumns[13], PaymentOrdersColumns[34]},
 			},
 			{
 				Name:    "paymentorder_order_type",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[14]},
+				Columns: []*schema.Column{PaymentOrdersColumns[18]},
 			},
 		},
 	}
@@ -1826,6 +1861,53 @@ var (
 			},
 		},
 	}
+	// UserAPIKeysColumns holds the columns for the "user_api_keys" table.
+	UserAPIKeysColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "group_id", Type: field.TypeInt64},
+		{Name: "key_hash", Type: field.TypeString, Size: 128},
+		{Name: "key_encrypted", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
+		{Name: "issued_by", Type: field.TypeString, Nullable: true, Size: 64},
+		{Name: "issued_by_id", Type: field.TypeString, Nullable: true, Size: 128},
+		{Name: "expires_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_used_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// UserAPIKeysTable holds the schema information for the "user_api_keys" table.
+	UserAPIKeysTable = &schema.Table{
+		Name:       "user_api_keys",
+		Columns:    UserAPIKeysColumns,
+		PrimaryKey: []*schema.Column{UserAPIKeysColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "userapikey_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{UserAPIKeysColumns[1]},
+			},
+			{
+				Name:    "userapikey_status",
+				Unique:  false,
+				Columns: []*schema.Column{UserAPIKeysColumns[5]},
+			},
+			{
+				Name:    "userapikey_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{UserAPIKeysColumns[8]},
+			},
+			{
+				Name:    "userapikey_user_id_group_id",
+				Unique:  true,
+				Columns: []*schema.Column{UserAPIKeysColumns[1], UserAPIKeysColumns[2]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "status = 'active'",
+				},
+			},
+		},
+	}
 	// UserAllowedGroupsColumns holds the columns for the "user_allowed_groups" table.
 	UserAllowedGroupsColumns = []*schema.Column{
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
@@ -2098,6 +2180,7 @@ var (
 		ChannelMonitorHistoriesTable,
 		ChannelMonitorRequestTemplatesTable,
 		CompositeModelRoutesTable,
+		DistributorBindingsTable,
 		ErrorPassthroughRulesTable,
 		GroupsTable,
 		IdempotencyRecordsTable,
@@ -2117,6 +2200,7 @@ var (
 		UsageCleanupTasksTable,
 		UsageLogsTable,
 		UsersTable,
+		UserAPIKeysTable,
 		UserAllowedGroupsTable,
 		UserAttributeDefinitionsTable,
 		UserAttributeValuesTable,
@@ -2184,6 +2268,9 @@ func init() {
 	CompositeModelRoutesTable.ForeignKeys[0].RefTable = GroupsTable
 	CompositeModelRoutesTable.Annotation = &entsql.Annotation{
 		Table: "composite_model_routes",
+	}
+	DistributorBindingsTable.Annotation = &entsql.Annotation{
+		Table: "distributor_bindings",
 	}
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",
@@ -2255,6 +2342,9 @@ func init() {
 	}
 	UsersTable.Annotation = &entsql.Annotation{
 		Table: "users",
+	}
+	UserAPIKeysTable.Annotation = &entsql.Annotation{
+		Table: "user_api_keys",
 	}
 	UserAllowedGroupsTable.ForeignKeys[0].RefTable = UsersTable
 	UserAllowedGroupsTable.ForeignKeys[1].RefTable = GroupsTable

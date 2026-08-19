@@ -22,6 +22,14 @@ const (
 	FieldUserName = "user_name"
 	// FieldUserNotes holds the string denoting the user_notes field in the database.
 	FieldUserNotes = "user_notes"
+	// FieldDistributorEmail holds the string denoting the distributor_email field in the database.
+	FieldDistributorEmail = "distributor_email"
+	// FieldExternalUserID holds the string denoting the external_user_id field in the database.
+	FieldExternalUserID = "external_user_id"
+	// FieldCreatedUserID holds the string denoting the created_user_id field in the database.
+	FieldCreatedUserID = "created_user_id"
+	// FieldDistributorID holds the string denoting the distributor_id field in the database.
+	FieldDistributorID = "distributor_id"
 	// FieldAmount holds the string denoting the amount field in the database.
 	FieldAmount = "amount"
 	// FieldPayAmount holds the string denoting the pay_amount field in the database.
@@ -112,6 +120,10 @@ var Columns = []string{
 	FieldUserEmail,
 	FieldUserName,
 	FieldUserNotes,
+	FieldDistributorEmail,
+	FieldExternalUserID,
+	FieldCreatedUserID,
+	FieldDistributorID,
 	FieldAmount,
 	FieldPayAmount,
 	FieldFeeRate,
@@ -164,6 +176,10 @@ var (
 	UserEmailValidator func(string) error
 	// UserNameValidator is a validator for the "user_name" field. It is called by the builders before save.
 	UserNameValidator func(string) error
+	// DistributorEmailValidator is a validator for the "distributor_email" field. It is called by the builders before save.
+	DistributorEmailValidator func(string) error
+	// ExternalUserIDValidator is a validator for the "external_user_id" field. It is called by the builders before save.
+	ExternalUserIDValidator func(string) error
 	// DefaultFeeRate holds the default value on creation for the "fee_rate" field.
 	DefaultFeeRate float64
 	// RechargeCodeValidator is a validator for the "recharge_code" field. It is called by the builders before save.
@@ -232,6 +248,26 @@ func ByUserName(opts ...sql.OrderTermOption) OrderOption {
 // ByUserNotes orders the results by the user_notes field.
 func ByUserNotes(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUserNotes, opts...).ToFunc()
+}
+
+// ByDistributorEmail orders the results by the distributor_email field.
+func ByDistributorEmail(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDistributorEmail, opts...).ToFunc()
+}
+
+// ByExternalUserID orders the results by the external_user_id field.
+func ByExternalUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExternalUserID, opts...).ToFunc()
+}
+
+// ByCreatedUserID orders the results by the created_user_id field.
+func ByCreatedUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedUserID, opts...).ToFunc()
+}
+
+// ByDistributorID orders the results by the distributor_id field.
+func ByDistributorID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDistributorID, opts...).ToFunc()
 }
 
 // ByAmount orders the results by the amount field.

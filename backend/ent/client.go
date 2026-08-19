@@ -30,6 +30,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
 	"github.com/Wei-Shaw/sub2api/ent/compositemodelroute"
+	"github.com/Wei-Shaw/sub2api/ent/distributorbinding"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -50,6 +51,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
+	"github.com/Wei-Shaw/sub2api/ent/userapikey"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
@@ -93,6 +95,8 @@ type Client struct {
 	ChannelMonitorRequestTemplate *ChannelMonitorRequestTemplateClient
 	// CompositeModelRoute is the client for interacting with the CompositeModelRoute builders.
 	CompositeModelRoute *CompositeModelRouteClient
+	// DistributorBinding is the client for interacting with the DistributorBinding builders.
+	DistributorBinding *DistributorBindingClient
 	// ErrorPassthroughRule is the client for interacting with the ErrorPassthroughRule builders.
 	ErrorPassthroughRule *ErrorPassthroughRuleClient
 	// Group is the client for interacting with the Group builders.
@@ -131,6 +135,8 @@ type Client struct {
 	UsageLog *UsageLogClient
 	// User is the client for interacting with the User builders.
 	User *UserClient
+	// UserAPIKey is the client for interacting with the UserAPIKey builders.
+	UserAPIKey *UserAPIKeyClient
 	// UserAllowedGroup is the client for interacting with the UserAllowedGroup builders.
 	UserAllowedGroup *UserAllowedGroupClient
 	// UserAttributeDefinition is the client for interacting with the UserAttributeDefinition builders.
@@ -167,6 +173,7 @@ func (c *Client) init() {
 	c.ChannelMonitorHistory = NewChannelMonitorHistoryClient(c.config)
 	c.ChannelMonitorRequestTemplate = NewChannelMonitorRequestTemplateClient(c.config)
 	c.CompositeModelRoute = NewCompositeModelRouteClient(c.config)
+	c.DistributorBinding = NewDistributorBindingClient(c.config)
 	c.ErrorPassthroughRule = NewErrorPassthroughRuleClient(c.config)
 	c.Group = NewGroupClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
@@ -186,6 +193,7 @@ func (c *Client) init() {
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
 	c.UsageLog = NewUsageLogClient(c.config)
 	c.User = NewUserClient(c.config)
+	c.UserAPIKey = NewUserAPIKeyClient(c.config)
 	c.UserAllowedGroup = NewUserAllowedGroupClient(c.config)
 	c.UserAttributeDefinition = NewUserAttributeDefinitionClient(c.config)
 	c.UserAttributeValue = NewUserAttributeValueClient(c.config)
@@ -298,6 +306,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
 		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
 		CompositeModelRoute:           NewCompositeModelRouteClient(cfg),
+		DistributorBinding:            NewDistributorBindingClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
@@ -317,6 +326,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
 		User:                          NewUserClient(cfg),
+		UserAPIKey:                    NewUserAPIKeyClient(cfg),
 		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
@@ -356,6 +366,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
 		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
 		CompositeModelRoute:           NewCompositeModelRouteClient(cfg),
+		DistributorBinding:            NewDistributorBindingClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
@@ -375,6 +386,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
 		User:                          NewUserClient(cfg),
+		UserAPIKey:                    NewUserAPIKeyClient(cfg),
 		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
@@ -413,13 +425,13 @@ func (c *Client) Use(hooks ...Hook) {
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.CompositeModelRoute, c.DistributorBinding, c.ErrorPassthroughRule, c.Group,
+		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAPIKey, c.UserAllowedGroup, c.UserAttributeDefinition,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -433,13 +445,13 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.CompositeModelRoute, c.DistributorBinding, c.ErrorPassthroughRule, c.Group,
+		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAPIKey, c.UserAllowedGroup, c.UserAttributeDefinition,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -478,6 +490,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ChannelMonitorRequestTemplate.mutate(ctx, m)
 	case *CompositeModelRouteMutation:
 		return c.CompositeModelRoute.mutate(ctx, m)
+	case *DistributorBindingMutation:
+		return c.DistributorBinding.mutate(ctx, m)
 	case *ErrorPassthroughRuleMutation:
 		return c.ErrorPassthroughRule.mutate(ctx, m)
 	case *GroupMutation:
@@ -516,6 +530,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UsageLog.mutate(ctx, m)
 	case *UserMutation:
 		return c.User.mutate(ctx, m)
+	case *UserAPIKeyMutation:
+		return c.UserAPIKey.mutate(ctx, m)
 	case *UserAllowedGroupMutation:
 		return c.UserAllowedGroup.mutate(ctx, m)
 	case *UserAttributeDefinitionMutation:
@@ -2880,6 +2896,139 @@ func (c *CompositeModelRouteClient) mutate(ctx context.Context, m *CompositeMode
 		return (&CompositeModelRouteDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown CompositeModelRoute mutation op: %q", m.Op())
+	}
+}
+
+// DistributorBindingClient is a client for the DistributorBinding schema.
+type DistributorBindingClient struct {
+	config
+}
+
+// NewDistributorBindingClient returns a client for the DistributorBinding from the given config.
+func NewDistributorBindingClient(c config) *DistributorBindingClient {
+	return &DistributorBindingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `distributorbinding.Hooks(f(g(h())))`.
+func (c *DistributorBindingClient) Use(hooks ...Hook) {
+	c.hooks.DistributorBinding = append(c.hooks.DistributorBinding, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `distributorbinding.Intercept(f(g(h())))`.
+func (c *DistributorBindingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.DistributorBinding = append(c.inters.DistributorBinding, interceptors...)
+}
+
+// Create returns a builder for creating a DistributorBinding entity.
+func (c *DistributorBindingClient) Create() *DistributorBindingCreate {
+	mutation := newDistributorBindingMutation(c.config, OpCreate)
+	return &DistributorBindingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of DistributorBinding entities.
+func (c *DistributorBindingClient) CreateBulk(builders ...*DistributorBindingCreate) *DistributorBindingCreateBulk {
+	return &DistributorBindingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *DistributorBindingClient) MapCreateBulk(slice any, setFunc func(*DistributorBindingCreate, int)) *DistributorBindingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &DistributorBindingCreateBulk{err: fmt.Errorf("calling to DistributorBindingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*DistributorBindingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &DistributorBindingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for DistributorBinding.
+func (c *DistributorBindingClient) Update() *DistributorBindingUpdate {
+	mutation := newDistributorBindingMutation(c.config, OpUpdate)
+	return &DistributorBindingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *DistributorBindingClient) UpdateOne(_m *DistributorBinding) *DistributorBindingUpdateOne {
+	mutation := newDistributorBindingMutation(c.config, OpUpdateOne, withDistributorBinding(_m))
+	return &DistributorBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *DistributorBindingClient) UpdateOneID(id int64) *DistributorBindingUpdateOne {
+	mutation := newDistributorBindingMutation(c.config, OpUpdateOne, withDistributorBindingID(id))
+	return &DistributorBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for DistributorBinding.
+func (c *DistributorBindingClient) Delete() *DistributorBindingDelete {
+	mutation := newDistributorBindingMutation(c.config, OpDelete)
+	return &DistributorBindingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *DistributorBindingClient) DeleteOne(_m *DistributorBinding) *DistributorBindingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *DistributorBindingClient) DeleteOneID(id int64) *DistributorBindingDeleteOne {
+	builder := c.Delete().Where(distributorbinding.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &DistributorBindingDeleteOne{builder}
+}
+
+// Query returns a query builder for DistributorBinding.
+func (c *DistributorBindingClient) Query() *DistributorBindingQuery {
+	return &DistributorBindingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeDistributorBinding},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a DistributorBinding entity by its id.
+func (c *DistributorBindingClient) Get(ctx context.Context, id int64) (*DistributorBinding, error) {
+	return c.Query().Where(distributorbinding.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *DistributorBindingClient) GetX(ctx context.Context, id int64) *DistributorBinding {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *DistributorBindingClient) Hooks() []Hook {
+	return c.hooks.DistributorBinding
+}
+
+// Interceptors returns the client interceptors.
+func (c *DistributorBindingClient) Interceptors() []Interceptor {
+	return c.inters.DistributorBinding
+}
+
+func (c *DistributorBindingClient) mutate(ctx context.Context, m *DistributorBindingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&DistributorBindingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&DistributorBindingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&DistributorBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&DistributorBindingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown DistributorBinding mutation op: %q", m.Op())
 	}
 }
 
@@ -6040,6 +6189,139 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 	}
 }
 
+// UserAPIKeyClient is a client for the UserAPIKey schema.
+type UserAPIKeyClient struct {
+	config
+}
+
+// NewUserAPIKeyClient returns a client for the UserAPIKey from the given config.
+func NewUserAPIKeyClient(c config) *UserAPIKeyClient {
+	return &UserAPIKeyClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `userapikey.Hooks(f(g(h())))`.
+func (c *UserAPIKeyClient) Use(hooks ...Hook) {
+	c.hooks.UserAPIKey = append(c.hooks.UserAPIKey, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `userapikey.Intercept(f(g(h())))`.
+func (c *UserAPIKeyClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UserAPIKey = append(c.inters.UserAPIKey, interceptors...)
+}
+
+// Create returns a builder for creating a UserAPIKey entity.
+func (c *UserAPIKeyClient) Create() *UserAPIKeyCreate {
+	mutation := newUserAPIKeyMutation(c.config, OpCreate)
+	return &UserAPIKeyCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UserAPIKey entities.
+func (c *UserAPIKeyClient) CreateBulk(builders ...*UserAPIKeyCreate) *UserAPIKeyCreateBulk {
+	return &UserAPIKeyCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UserAPIKeyClient) MapCreateBulk(slice any, setFunc func(*UserAPIKeyCreate, int)) *UserAPIKeyCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UserAPIKeyCreateBulk{err: fmt.Errorf("calling to UserAPIKeyClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UserAPIKeyCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UserAPIKeyCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UserAPIKey.
+func (c *UserAPIKeyClient) Update() *UserAPIKeyUpdate {
+	mutation := newUserAPIKeyMutation(c.config, OpUpdate)
+	return &UserAPIKeyUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UserAPIKeyClient) UpdateOne(_m *UserAPIKey) *UserAPIKeyUpdateOne {
+	mutation := newUserAPIKeyMutation(c.config, OpUpdateOne, withUserAPIKey(_m))
+	return &UserAPIKeyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UserAPIKeyClient) UpdateOneID(id int64) *UserAPIKeyUpdateOne {
+	mutation := newUserAPIKeyMutation(c.config, OpUpdateOne, withUserAPIKeyID(id))
+	return &UserAPIKeyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UserAPIKey.
+func (c *UserAPIKeyClient) Delete() *UserAPIKeyDelete {
+	mutation := newUserAPIKeyMutation(c.config, OpDelete)
+	return &UserAPIKeyDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UserAPIKeyClient) DeleteOne(_m *UserAPIKey) *UserAPIKeyDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UserAPIKeyClient) DeleteOneID(id int64) *UserAPIKeyDeleteOne {
+	builder := c.Delete().Where(userapikey.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UserAPIKeyDeleteOne{builder}
+}
+
+// Query returns a query builder for UserAPIKey.
+func (c *UserAPIKeyClient) Query() *UserAPIKeyQuery {
+	return &UserAPIKeyQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUserAPIKey},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UserAPIKey entity by its id.
+func (c *UserAPIKeyClient) Get(ctx context.Context, id int64) (*UserAPIKey, error) {
+	return c.Query().Where(userapikey.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UserAPIKeyClient) GetX(ctx context.Context, id int64) *UserAPIKey {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *UserAPIKeyClient) Hooks() []Hook {
+	return c.hooks.UserAPIKey
+}
+
+// Interceptors returns the client interceptors.
+func (c *UserAPIKeyClient) Interceptors() []Interceptor {
+	return c.inters.UserAPIKey
+}
+
+func (c *UserAPIKeyClient) mutate(ctx context.Context, m *UserAPIKeyMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserAPIKeyCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserAPIKeyUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserAPIKeyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserAPIKeyDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserAPIKey mutation op: %q", m.Op())
+	}
+}
+
 // UserAllowedGroupClient is a client for the UserAllowedGroup schema.
 type UserAllowedGroupClient struct {
 	config
@@ -6828,25 +7110,25 @@ type (
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		ChannelMonitorRequestTemplate, CompositeModelRoute, DistributorBinding,
+		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAPIKey, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		ChannelMonitorRequestTemplate, CompositeModelRoute, DistributorBinding,
+		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAPIKey, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

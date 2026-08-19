@@ -51,6 +51,9 @@ type ChannelMonitorRequestTemplate func(*sql.Selector)
 // CompositeModelRoute is the predicate function for compositemodelroute builders.
 type CompositeModelRoute func(*sql.Selector)
 
+// DistributorBinding is the predicate function for distributorbinding builders.
+type DistributorBinding func(*sql.Selector)
+
 // ErrorPassthroughRule is the predicate function for errorpassthroughrule builders.
 type ErrorPassthroughRule func(*sql.Selector)
 
@@ -107,6 +110,9 @@ type UsageLog func(*sql.Selector)
 
 // User is the predicate function for user builders.
 type User func(*sql.Selector)
+
+// UserAPIKey is the predicate function for userapikey builders.
+type UserAPIKey func(*sql.Selector)
 
 // UserAllowedGroup is the predicate function for userallowedgroup builders.
 type UserAllowedGroup func(*sql.Selector)

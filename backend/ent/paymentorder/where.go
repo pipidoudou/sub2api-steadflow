@@ -75,6 +75,26 @@ func UserNotes(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldUserNotes, v))
 }
 
+// DistributorEmail applies equality check predicate on the "distributor_email" field. It's identical to DistributorEmailEQ.
+func DistributorEmail(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldDistributorEmail, v))
+}
+
+// ExternalUserID applies equality check predicate on the "external_user_id" field. It's identical to ExternalUserIDEQ.
+func ExternalUserID(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldExternalUserID, v))
+}
+
+// CreatedUserID applies equality check predicate on the "created_user_id" field. It's identical to CreatedUserIDEQ.
+func CreatedUserID(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldCreatedUserID, v))
+}
+
+// DistributorID applies equality check predicate on the "distributor_id" field. It's identical to DistributorIDEQ.
+func DistributorID(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldDistributorID, v))
+}
+
 // Amount applies equality check predicate on the "amount" field. It's identical to AmountEQ.
 func Amount(v float64) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldAmount, v))
@@ -468,6 +488,256 @@ func UserNotesEqualFold(v string) predicate.PaymentOrder {
 // UserNotesContainsFold applies the ContainsFold predicate on the "user_notes" field.
 func UserNotesContainsFold(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldContainsFold(FieldUserNotes, v))
+}
+
+// DistributorEmailEQ applies the EQ predicate on the "distributor_email" field.
+func DistributorEmailEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldDistributorEmail, v))
+}
+
+// DistributorEmailNEQ applies the NEQ predicate on the "distributor_email" field.
+func DistributorEmailNEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldDistributorEmail, v))
+}
+
+// DistributorEmailIn applies the In predicate on the "distributor_email" field.
+func DistributorEmailIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldDistributorEmail, vs...))
+}
+
+// DistributorEmailNotIn applies the NotIn predicate on the "distributor_email" field.
+func DistributorEmailNotIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldDistributorEmail, vs...))
+}
+
+// DistributorEmailGT applies the GT predicate on the "distributor_email" field.
+func DistributorEmailGT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldDistributorEmail, v))
+}
+
+// DistributorEmailGTE applies the GTE predicate on the "distributor_email" field.
+func DistributorEmailGTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldDistributorEmail, v))
+}
+
+// DistributorEmailLT applies the LT predicate on the "distributor_email" field.
+func DistributorEmailLT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldDistributorEmail, v))
+}
+
+// DistributorEmailLTE applies the LTE predicate on the "distributor_email" field.
+func DistributorEmailLTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldDistributorEmail, v))
+}
+
+// DistributorEmailContains applies the Contains predicate on the "distributor_email" field.
+func DistributorEmailContains(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContains(FieldDistributorEmail, v))
+}
+
+// DistributorEmailHasPrefix applies the HasPrefix predicate on the "distributor_email" field.
+func DistributorEmailHasPrefix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasPrefix(FieldDistributorEmail, v))
+}
+
+// DistributorEmailHasSuffix applies the HasSuffix predicate on the "distributor_email" field.
+func DistributorEmailHasSuffix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasSuffix(FieldDistributorEmail, v))
+}
+
+// DistributorEmailIsNil applies the IsNil predicate on the "distributor_email" field.
+func DistributorEmailIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldDistributorEmail))
+}
+
+// DistributorEmailNotNil applies the NotNil predicate on the "distributor_email" field.
+func DistributorEmailNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldDistributorEmail))
+}
+
+// DistributorEmailEqualFold applies the EqualFold predicate on the "distributor_email" field.
+func DistributorEmailEqualFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEqualFold(FieldDistributorEmail, v))
+}
+
+// DistributorEmailContainsFold applies the ContainsFold predicate on the "distributor_email" field.
+func DistributorEmailContainsFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContainsFold(FieldDistributorEmail, v))
+}
+
+// ExternalUserIDEQ applies the EQ predicate on the "external_user_id" field.
+func ExternalUserIDEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldExternalUserID, v))
+}
+
+// ExternalUserIDNEQ applies the NEQ predicate on the "external_user_id" field.
+func ExternalUserIDNEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldExternalUserID, v))
+}
+
+// ExternalUserIDIn applies the In predicate on the "external_user_id" field.
+func ExternalUserIDIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldExternalUserID, vs...))
+}
+
+// ExternalUserIDNotIn applies the NotIn predicate on the "external_user_id" field.
+func ExternalUserIDNotIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldExternalUserID, vs...))
+}
+
+// ExternalUserIDGT applies the GT predicate on the "external_user_id" field.
+func ExternalUserIDGT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldExternalUserID, v))
+}
+
+// ExternalUserIDGTE applies the GTE predicate on the "external_user_id" field.
+func ExternalUserIDGTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldExternalUserID, v))
+}
+
+// ExternalUserIDLT applies the LT predicate on the "external_user_id" field.
+func ExternalUserIDLT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldExternalUserID, v))
+}
+
+// ExternalUserIDLTE applies the LTE predicate on the "external_user_id" field.
+func ExternalUserIDLTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldExternalUserID, v))
+}
+
+// ExternalUserIDContains applies the Contains predicate on the "external_user_id" field.
+func ExternalUserIDContains(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContains(FieldExternalUserID, v))
+}
+
+// ExternalUserIDHasPrefix applies the HasPrefix predicate on the "external_user_id" field.
+func ExternalUserIDHasPrefix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasPrefix(FieldExternalUserID, v))
+}
+
+// ExternalUserIDHasSuffix applies the HasSuffix predicate on the "external_user_id" field.
+func ExternalUserIDHasSuffix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasSuffix(FieldExternalUserID, v))
+}
+
+// ExternalUserIDIsNil applies the IsNil predicate on the "external_user_id" field.
+func ExternalUserIDIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldExternalUserID))
+}
+
+// ExternalUserIDNotNil applies the NotNil predicate on the "external_user_id" field.
+func ExternalUserIDNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldExternalUserID))
+}
+
+// ExternalUserIDEqualFold applies the EqualFold predicate on the "external_user_id" field.
+func ExternalUserIDEqualFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEqualFold(FieldExternalUserID, v))
+}
+
+// ExternalUserIDContainsFold applies the ContainsFold predicate on the "external_user_id" field.
+func ExternalUserIDContainsFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContainsFold(FieldExternalUserID, v))
+}
+
+// CreatedUserIDEQ applies the EQ predicate on the "created_user_id" field.
+func CreatedUserIDEQ(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldCreatedUserID, v))
+}
+
+// CreatedUserIDNEQ applies the NEQ predicate on the "created_user_id" field.
+func CreatedUserIDNEQ(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldCreatedUserID, v))
+}
+
+// CreatedUserIDIn applies the In predicate on the "created_user_id" field.
+func CreatedUserIDIn(vs ...int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldCreatedUserID, vs...))
+}
+
+// CreatedUserIDNotIn applies the NotIn predicate on the "created_user_id" field.
+func CreatedUserIDNotIn(vs ...int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldCreatedUserID, vs...))
+}
+
+// CreatedUserIDGT applies the GT predicate on the "created_user_id" field.
+func CreatedUserIDGT(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldCreatedUserID, v))
+}
+
+// CreatedUserIDGTE applies the GTE predicate on the "created_user_id" field.
+func CreatedUserIDGTE(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldCreatedUserID, v))
+}
+
+// CreatedUserIDLT applies the LT predicate on the "created_user_id" field.
+func CreatedUserIDLT(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldCreatedUserID, v))
+}
+
+// CreatedUserIDLTE applies the LTE predicate on the "created_user_id" field.
+func CreatedUserIDLTE(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldCreatedUserID, v))
+}
+
+// CreatedUserIDIsNil applies the IsNil predicate on the "created_user_id" field.
+func CreatedUserIDIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldCreatedUserID))
+}
+
+// CreatedUserIDNotNil applies the NotNil predicate on the "created_user_id" field.
+func CreatedUserIDNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldCreatedUserID))
+}
+
+// DistributorIDEQ applies the EQ predicate on the "distributor_id" field.
+func DistributorIDEQ(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldDistributorID, v))
+}
+
+// DistributorIDNEQ applies the NEQ predicate on the "distributor_id" field.
+func DistributorIDNEQ(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldDistributorID, v))
+}
+
+// DistributorIDIn applies the In predicate on the "distributor_id" field.
+func DistributorIDIn(vs ...int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldDistributorID, vs...))
+}
+
+// DistributorIDNotIn applies the NotIn predicate on the "distributor_id" field.
+func DistributorIDNotIn(vs ...int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldDistributorID, vs...))
+}
+
+// DistributorIDGT applies the GT predicate on the "distributor_id" field.
+func DistributorIDGT(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldDistributorID, v))
+}
+
+// DistributorIDGTE applies the GTE predicate on the "distributor_id" field.
+func DistributorIDGTE(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldDistributorID, v))
+}
+
+// DistributorIDLT applies the LT predicate on the "distributor_id" field.
+func DistributorIDLT(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldDistributorID, v))
+}
+
+// DistributorIDLTE applies the LTE predicate on the "distributor_id" field.
+func DistributorIDLTE(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldDistributorID, v))
+}
+
+// DistributorIDIsNil applies the IsNil predicate on the "distributor_id" field.
+func DistributorIDIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldDistributorID))
+}
+
+// DistributorIDNotNil applies the NotNil predicate on the "distributor_id" field.
+func DistributorIDNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldDistributorID))
 }
 
 // AmountEQ applies the EQ predicate on the "amount" field.

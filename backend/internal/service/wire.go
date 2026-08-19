@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"os"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/Wei-Shaw/sub2api/internal/service/distributor"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -912,7 +914,50 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorV2Aggregator,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+
+	// Distributor services are provided here to avoid a child-to-parent import cycle.
+	ProvideSubscriptionAssignerAdapter,
+	ProvideShadowUserService,
+	ProvideUserAPIKeyService,
+	ProvideDistributorOrderService,
 )
+
+type subscriptionAssignerAdapter struct {
+	svc *SubscriptionService
+}
+
+func (a *subscriptionAssignerAdapter) AssignOrExtendSubscription(ctx context.Context, input *distributor.SubscriptionAssignInput) error {
+	_, _, err := a.svc.AssignOrExtendSubscription(ctx, &AssignSubscriptionInput{
+		UserID:       input.UserID,
+		GroupID:      input.GroupID,
+		ValidityDays: input.ValidityDays,
+		AssignedBy:   input.AssignedBy,
+		Notes:        input.Notes,
+	})
+	return err
+}
+
+func ProvideSubscriptionAssignerAdapter(svc *SubscriptionService) distributor.SubscriptionAssigner {
+	return &subscriptionAssignerAdapter{svc: svc}
+}
+
+func ProvideShadowUserService(db *dbent.Client, logger *slog.Logger) *distributor.ShadowUserService {
+	return distributor.NewShadowUserService(db, logger)
+}
+
+func ProvideUserAPIKeyService(db *dbent.Client, logger *slog.Logger, cfg *config.Config) (*distributor.UserAPIKeyService, error) {
+	return distributor.NewUserAPIKeyService(db, logger, cfg.Totp.EncryptionKey)
+}
+
+func ProvideDistributorOrderService(
+	db *dbent.Client,
+	shadowService *distributor.ShadowUserService,
+	apiKeyService *distributor.UserAPIKeyService,
+	assigner distributor.SubscriptionAssigner,
+	logger *slog.Logger,
+) *distributor.DistributorOrderService {
+	return distributor.NewDistributorOrderService(db, shadowService, apiKeyService, assigner, logger)
+}
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {

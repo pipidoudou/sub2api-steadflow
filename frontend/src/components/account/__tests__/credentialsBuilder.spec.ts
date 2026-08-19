@@ -63,7 +63,6 @@ describe('applyInterceptWarmup', () => {
     expect('intercept_warmup_requests' in creds).toBe(false)
   })
 })
-
 describe('applyAntigravityProjectID', () => {
   it('create + project id: trims and stores configured project fallback', () => {
     const creds: Record<string, unknown> = { access_token: 'tok' }
@@ -468,4 +467,3 @@ describe('plan_type helpers', () => {
     })
   })
 })
-

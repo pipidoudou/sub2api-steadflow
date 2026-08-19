@@ -2147,6 +2147,42 @@ func (a *Account) IsCodexCLIOnlyEnabled() bool {
 	return ok && enabled
 }
 
+// GetCodexCLIOnlyAllowedClients returns the named client preset IDs that are
+// additionally allowed for an OpenAI OAuth account protected by codex_cli_only.
+// The presets themselves are defined by the OpenAI client registry; account
+// configuration may only refer to those preset IDs.
+func (a *Account) GetCodexCLIOnlyAllowedClients() []string {
+	if a == nil || !a.IsOpenAIOAuth() || a.Extra == nil {
+		return nil
+	}
+	raw, ok := a.Extra["codex_cli_only_allowed_clients"]
+	if !ok || raw == nil {
+		return nil
+	}
+
+	switch value := raw.(type) {
+	case []string:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			if strings.TrimSpace(item) != "" {
+				result = append(result, item)
+			}
+		}
+		return result
+	case []any:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			text, ok := item.(string)
+			if ok && strings.TrimSpace(text) != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 // IsCodexCLIOnlyAppServerAllowed 返回 codex_cli_only 账号是否额外放行 Codex app-server
 // 第三方客户端（运行时与全局 app_server 开关 OR）。字段：accounts.extra.codex_cli_only_allow_app_server。
 // 仅在 codex_cli_only 已启用时有意义；字段缺失或类型不符按 false（不放行）处理。

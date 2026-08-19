@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"log"
+	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +39,16 @@ func SetupRouter(
 	cfg *config.Config,
 	redisClient *redis.Client,
 ) *gin.Engine {
+	// Download distribution is intentionally disabled in the console fork. Abort
+	// before the embedded SPA middleware can turn the path into a 200 fallback.
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/downloads/") || c.Request.URL.Path == "/downloads" {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.Next()
+	})
+
 	middleware2.SetIngressRejectRecorder(opsService)
 	// 缓存 iframe 页面的 origin 列表，用于动态注入 CSP frame-src
 	var cachedFrameOrigins atomic.Pointer[[]string]
@@ -132,4 +144,7 @@ func registerRoutes(
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, settingService, panelRateLimiter)
 
 	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService)
+
+	// BFF-facing distributor endpoints retained from the Steadflow integration.
+	routes.RegisterDistributorRoutes(v1, h.Distributor, h.DistributorAuthMiddleware)
 }

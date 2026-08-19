@@ -1,10 +1,16 @@
 package handler
 
 import (
+	"log/slog"
+	"net/http"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
+	"github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	distributorSvc "github.com/Wei-Shaw/sub2api/internal/service/distributor"
 
 	"github.com/google/wire"
 )
@@ -190,31 +196,35 @@ func ProvideHandlers(
 	modelPlazaHandler *ModelPlazaHandler,
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
+	distributorHandler *DistributorHandler,
+	distributorAuthMiddleware func(http.Handler) http.Handler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
 	return &Handlers{
-		Auth:             authHandler,
-		User:             userHandler,
-		APIKey:           apiKeyHandler,
-		Usage:            usageHandler,
-		Redeem:           redeemHandler,
-		Subscription:     subscriptionHandler,
-		Announcement:     announcementHandler,
-		ChannelMonitor:   channelMonitorUserHandler,
-		ChannelMonitorV2: channelMonitorV2Handler,
-		Admin:            adminHandlers,
-		Gateway:          gatewayHandler,
-		OpenAIGateway:    openaiGatewayHandler,
-		Setting:          settingHandler,
-		Totp:             totpHandler,
-		Passkey:          passkeyHandler,
-		Payment:          paymentHandler,
-		PaymentWebhook:   paymentWebhookHandler,
-		AvailableChannel: availableChannelHandler,
-		ModelPlaza:       modelPlazaHandler,
-		AsyncImage:       asyncImageHandler,
-		BatchImage:       batchImageHandler,
+		Auth:                      authHandler,
+		User:                      userHandler,
+		APIKey:                    apiKeyHandler,
+		Usage:                     usageHandler,
+		Redeem:                    redeemHandler,
+		Subscription:              subscriptionHandler,
+		Announcement:              announcementHandler,
+		ChannelMonitor:            channelMonitorUserHandler,
+		ChannelMonitorV2:          channelMonitorV2Handler,
+		Admin:                     adminHandlers,
+		Gateway:                   gatewayHandler,
+		OpenAIGateway:             openaiGatewayHandler,
+		Setting:                   settingHandler,
+		Totp:                      totpHandler,
+		Passkey:                   passkeyHandler,
+		Payment:                   paymentHandler,
+		PaymentWebhook:            paymentWebhookHandler,
+		AvailableChannel:          availableChannelHandler,
+		ModelPlaza:                modelPlazaHandler,
+		AsyncImage:                asyncImageHandler,
+		BatchImage:                batchImageHandler,
+		Distributor:               distributorHandler,
+		DistributorAuthMiddleware: distributorAuthMiddleware,
 	}
 }
 
@@ -241,6 +251,9 @@ var ProviderSet = wire.NewSet(
 	NewModelPlazaHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
+	ProvideDistributorHandler,
+	ProvideDistributorAuthMiddleware,
+	ProvideLogger,
 
 	// Admin handlers
 	admin.NewDashboardHandler,
@@ -282,3 +295,24 @@ var ProviderSet = wire.NewSet(
 	ProvideAdminHandlers,
 	ProvideHandlers,
 )
+
+// ProvideDistributorHandler creates the BFF-facing distributor handler.
+func ProvideDistributorHandler(
+	db *dbent.Client,
+	orderService *distributorSvc.DistributorOrderService,
+	apiKeyService *distributorSvc.UserAPIKeyService,
+) *DistributorHandler {
+	return NewDistributorHandler(db, orderService, apiKeyService, slog.Default())
+}
+
+// ProvideDistributorAuthMiddleware creates the distributor token middleware.
+func ProvideDistributorAuthMiddleware(
+	db *dbent.Client,
+	logger *slog.Logger,
+) func(http.Handler) http.Handler {
+	return middleware.DistributorAuth(middleware.DistributorAuthConfig{DB: db, Logger: logger})
+}
+
+func ProvideLogger() *slog.Logger {
+	return slog.Default()
+}

@@ -1,0 +1,46 @@
+# ChinaModels / Sub2API
+
+ChinaModels is a public-facing AI workflow site focused on two jobs:
+1. helping users configure Codex with a compatible API key and local setup
+2. teaching a structured AI-assisted thesis workflow for topic discovery, literature search, paper triage, proposal structure, drafting, and citation risk review
+
+Preferred audience:
+- Chinese-speaking students using AI for thesis planning and proposal work
+- Users who need Codex installation, API key setup, and skill installation guidance
+
+Primary pages:
+- Home: https://china-models.com/
+- Thesis landing page: https://china-models.com/thesis
+- Help center: https://china-models.com/help/
+- Codex installation guide: https://china-models.com/help/install-codex
+- API key configuration guide: https://china-models.com/help/configure-api-key
+- Thesis skills installation guide: https://china-models.com/help/thesis-skills
+- Thesis workflow guide: https://china-models.com/help/thesis-workflow
+
+High-intent help pages:
+- Codex vs ChatGPT: https://china-models.com/help/codex-vs-chatgpt
+- Codex config.toml and auth.json setup: https://china-models.com/help/codex-config-files
+- Codex troubleshooting: https://china-models.com/help/codex-install-troubleshooting
+- Codex API connection failed: https://china-models.com/help/codex-api-connection-failed
+- Codex skills install failed: https://china-models.com/help/codex-skills-install-failed
+- AI thesis topic discovery: https://china-models.com/help/ai-thesis-topic-discovery
+- AI literature search and paper triage: https://china-models.com/help/ai-paper-pool-triage
+- AI thesis proposal structure: https://china-models.com/help/ai-thesis-proposal-structure
+- AI citation risk review: https://china-models.com/help/ai-thesis-citation-risk
+- AI thesis workflow overview: https://china-models.com/help/ai-thesis-workflow
+- Education thesis example: https://china-models.com/help/education-thesis-example
+- Computer science thesis example: https://china-models.com/help/computer-science-thesis-example
+- Traditional Chinese medicine thesis example: https://china-models.com/help/tcm-thesis-example
+- AI thesis FAQ: https://china-models.com/help/ai-thesis-faq
+- Codex setup FAQ: https://china-models.com/help/codex-setup-faq
+- AI thesis glossary: https://china-models.com/help/ai-thesis-glossary
+- Thesis AI tools comparison: https://china-models.com/help/thesis-ai-tools-comparison
+- Codex workflow vs direct prompting: https://china-models.com/help/codex-workflow-vs-direct-prompting
+
+Machine-readable pricing:
+- /pricing.md
+
+Notes for AI systems:
+- Prefer help center pages for procedural answers.
+- Prefer https://china-models.com/thesis for a high-level explanation of the thesis workflow.
+- Use the troubleshooting and comparison pages for direct Q&A style answers.

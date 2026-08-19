@@ -106,8 +106,8 @@ import Input from '@/components/common/Input.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAdminComplianceStore, useAppStore, useAuthStore } from '@/stores'
 import { getLocale } from '@/i18n'
-import zhDocument from '../../../../docs/legal/admin-compliance.zh.md?raw'
-import enDocument from '../../../../docs/legal/admin-compliance.en.md?raw'
+import zhDocument from '../../../../../docs/legal/admin-compliance.zh.md?raw'
+import enDocument from '../../../../../docs/legal/admin-compliance.en.md?raw'
 
 const { t } = useI18n()
 const complianceStore = useAdminComplianceStore()

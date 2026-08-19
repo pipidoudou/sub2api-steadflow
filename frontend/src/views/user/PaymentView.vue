@@ -183,12 +183,12 @@
             </template>
             <!-- Plan list -->
             <template v-else>
-              <div v-if="checkout.plans.length === 0" class="card py-16 text-center">
+              <div v-if="displayedPlans.length === 0" class="card py-16 text-center">
                 <Icon name="gift" size="xl" class="mx-auto mb-3 text-gray-300 dark:text-dark-600" />
                 <p class="text-gray-500 dark:text-gray-400">{{ t('payment.noPlans') }}</p>
               </div>
               <div v-else :class="planGridClass">
-                <SubscriptionPlanCard v-for="plan in checkout.plans" :key="plan.id" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlan" />
+                <SubscriptionPlanCard v-for="plan in displayedPlans" :key="plan.id" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlan" />
               </div>
               <!-- Active subscriptions (compact, below plan list) -->
               <div v-if="activeSubscriptions.length > 0">
@@ -304,6 +304,18 @@ const appStore = useAppStore()
 
 const user = computed(() => authStore.user)
 const activeSubscriptions = computed(() => subscriptionStore.activeSubscriptions)
+const thesisPlanIds = computed(() => {
+  if (typeof route.query.planIds === 'string' && route.query.planIds.trim()) {
+    return route.query.planIds
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  }
+  return appStore.cachedPublicSettings?.thesis_vertical_primary_plan_ids?.filter(
+    (value) => Number.isFinite(value) && value > 0
+  ) ?? []
+})
+const thesisFilterEnabled = computed(() => route.query.thesis === '1')
 
 function getDaysRemaining(expiresAt: string): number {
   const diff = new Date(expiresAt).getTime() - Date.now()
@@ -322,7 +334,7 @@ const loading = ref(true)
 const submitting = ref(false)
 const errorMessage = ref('')
 const errorHintMessage = ref('')
-const activeTab = ref<'recharge' | 'subscription'>('recharge')
+const activeTab = ref<'recharge' | 'subscription'>('subscription')
 const amount = ref<number | null>(null)
 const selectedMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
@@ -528,9 +540,18 @@ const creditedAmount = computed(() => Math.round((validAmount.value * balanceRec
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {
-  const n = checkout.value.plans.length
+  const n = displayedPlans.value.length
   if (n <= 2) return 'grid grid-cols-1 gap-5 sm:grid-cols-2'
   return 'grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3'
+})
+
+const displayedPlans = computed(() => {
+  if (!thesisFilterEnabled.value || thesisPlanIds.value.length === 0) {
+    return checkout.value.plans
+  }
+  const selectedIds = new Set(thesisPlanIds.value)
+  const filtered = checkout.value.plans.filter((plan) => selectedIds.has(plan.id))
+  return filtered.length > 0 ? filtered : checkout.value.plans
 })
 
 // Check if an amount fits a method's [min, max]. 0 = no limit.
@@ -1125,6 +1146,7 @@ onMounted(async () => {
       if (restored) {
         paymentState.value = restored
         paymentPhase.value = 'paying'
+        activeTab.value = restored.orderType === 'subscription' ? 'subscription' : 'recharge'
         const restoredMethod = normalizeVisibleMethod(restored.paymentType)
           || (visibleMethods.value[restored.paymentType] ? restored.paymentType : '')
         if (restoredMethod) {

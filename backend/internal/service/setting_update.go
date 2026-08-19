@@ -347,6 +347,21 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
 	updates[SettingKeyPurchaseSubscriptionURL] = strings.TrimSpace(settings.PurchaseSubscriptionURL)
+	updates[SettingKeyThesisVerticalEnabled] = strconv.FormatBool(settings.ThesisVerticalEnabled)
+	updates[SettingKeyThesisVerticalBrandDomain] = strings.TrimSpace(settings.ThesisVerticalBrandDomain)
+	thesisPlanIDs, err := json.Marshal(normalizeIntArray(settings.ThesisVerticalPrimaryPlanIDs))
+	if err != nil {
+		return nil, fmt.Errorf("marshal thesis vertical primary plan ids: %w", err)
+	}
+	updates[SettingKeyThesisVerticalPrimaryPlanIDs] = string(thesisPlanIDs)
+	updates[SettingKeyThesisVerticalCodexGuideURL] = strings.TrimSpace(settings.ThesisVerticalCodexGuideURL)
+	updates[SettingKeyThesisVerticalSkillPackURL] = strings.TrimSpace(settings.ThesisVerticalSkillPackURL)
+	thesisDisciplines, err := json.Marshal(normalizeStringArray(settings.ThesisVerticalSupportDisciplines))
+	if err != nil {
+		return nil, fmt.Errorf("marshal thesis vertical support disciplines: %w", err)
+	}
+	updates[SettingKeyThesisVerticalSupportDisciplines] = string(thesisDisciplines)
+	updates[SettingKeyCodexClientSkillsCatalogJSON] = strings.TrimSpace(settings.CodexClientSkillsCatalogJSON)
 	tableDefaultPageSize, tablePageSizeOptions := normalizeTablePreferences(
 		settings.TableDefaultPageSize,
 		settings.TablePageSizeOptions,

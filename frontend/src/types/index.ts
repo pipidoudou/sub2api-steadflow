@@ -237,6 +237,12 @@ export interface PublicSettings {
   home_content: string
   compact_home_enabled: boolean
   hide_ccs_import_button: boolean
+  thesis_vertical_enabled: boolean
+  thesis_vertical_brand_domain: string
+  thesis_vertical_primary_plan_ids: number[]
+  thesis_vertical_codex_guide_url: string
+  thesis_vertical_skill_pack_url: string
+  thesis_vertical_support_disciplines: string[]
   payment_enabled: boolean
   risk_control_enabled: boolean
   table_default_page_size: number

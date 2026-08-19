@@ -191,6 +191,13 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyHideCcsImportButton,
 		SettingKeyPurchaseSubscriptionEnabled,
 		SettingKeyPurchaseSubscriptionURL,
+		SettingKeyThesisVerticalEnabled,
+		SettingKeyThesisVerticalBrandDomain,
+		SettingKeyThesisVerticalPrimaryPlanIDs,
+		SettingKeyThesisVerticalCodexGuideURL,
+		SettingKeyThesisVerticalSkillPackURL,
+		SettingKeyThesisVerticalSupportDisciplines,
+		SettingKeyCodexClientSkillsCatalogJSON,
 		SettingKeyTableDefaultPageSize,
 		SettingKeyTablePageSizeOptions,
 		SettingKeyCustomMenuItems,
@@ -331,6 +338,13 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		HideCcsImportButton:                 settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:         settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
 		PurchaseSubscriptionURL:             strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
+		ThesisVerticalEnabled:               settings[SettingKeyThesisVerticalEnabled] == "true",
+		ThesisVerticalBrandDomain:           strings.TrimSpace(settings[SettingKeyThesisVerticalBrandDomain]),
+		ThesisVerticalPrimaryPlanIDs:        parseIntArray(settings[SettingKeyThesisVerticalPrimaryPlanIDs]),
+		ThesisVerticalCodexGuideURL:         strings.TrimSpace(settings[SettingKeyThesisVerticalCodexGuideURL]),
+		ThesisVerticalSkillPackURL:          strings.TrimSpace(settings[SettingKeyThesisVerticalSkillPackURL]),
+		ThesisVerticalSupportDisciplines:    parseStringArray(settings[SettingKeyThesisVerticalSupportDisciplines]),
+		CodexClientSkillsCatalogJSON:        strings.TrimSpace(settings[SettingKeyCodexClientSkillsCatalogJSON]),
 		TableDefaultPageSize:                tableDefaultPageSize,
 		TablePageSizeOptions:                tablePageSizeOptions,
 		CustomMenuItems:                     settings[SettingKeyCustomMenuItems],
@@ -580,6 +594,13 @@ type PublicSettingsInjectionPayload struct {
 	HideCcsImportButton                 bool                     `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled         bool                     `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL             string                   `json:"purchase_subscription_url"`
+	ThesisVerticalEnabled               bool                     `json:"thesis_vertical_enabled"`
+	ThesisVerticalBrandDomain           string                   `json:"thesis_vertical_brand_domain"`
+	ThesisVerticalPrimaryPlanIDs        []int                    `json:"thesis_vertical_primary_plan_ids"`
+	ThesisVerticalCodexGuideURL         string                   `json:"thesis_vertical_codex_guide_url"`
+	ThesisVerticalSkillPackURL          string                   `json:"thesis_vertical_skill_pack_url"`
+	ThesisVerticalSupportDisciplines    []string                 `json:"thesis_vertical_support_disciplines"`
+	CodexClientSkillsCatalogJSON        string                   `json:"codex_client_skills_catalog_json"`
 	TableDefaultPageSize                int                      `json:"table_default_page_size"`
 	TablePageSizeOptions                []int                    `json:"table_page_size_options"`
 	CustomMenuItems                     json.RawMessage          `json:"custom_menu_items"`
@@ -668,6 +689,13 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		HideCcsImportButton:                 settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:         settings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:             settings.PurchaseSubscriptionURL,
+		ThesisVerticalEnabled:               settings.ThesisVerticalEnabled,
+		ThesisVerticalBrandDomain:           settings.ThesisVerticalBrandDomain,
+		ThesisVerticalPrimaryPlanIDs:        settings.ThesisVerticalPrimaryPlanIDs,
+		ThesisVerticalCodexGuideURL:         settings.ThesisVerticalCodexGuideURL,
+		ThesisVerticalSkillPackURL:          settings.ThesisVerticalSkillPackURL,
+		ThesisVerticalSupportDisciplines:    settings.ThesisVerticalSupportDisciplines,
+		CodexClientSkillsCatalogJSON:        settings.CodexClientSkillsCatalogJSON,
 		TableDefaultPageSize:                settings.TableDefaultPageSize,
 		TablePageSizeOptions:                settings.TablePageSizeOptions,
 		CustomMenuItems:                     filterUserVisibleMenuItems(settings.CustomMenuItems),

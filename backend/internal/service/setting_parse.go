@@ -71,6 +71,13 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySiteLogo:                                  "",
 		SettingKeyPurchaseSubscriptionEnabled:               "false",
 		SettingKeyPurchaseSubscriptionURL:                   "",
+		SettingKeyThesisVerticalEnabled:                     "false",
+		SettingKeyThesisVerticalBrandDomain:                 "",
+		SettingKeyThesisVerticalPrimaryPlanIDs:              "[]",
+		SettingKeyThesisVerticalCodexGuideURL:               "",
+		SettingKeyThesisVerticalSkillPackURL:                "",
+		SettingKeyThesisVerticalSupportDisciplines:          "[]",
+		SettingKeyCodexClientSkillsCatalogJSON:              "[]",
 		SettingKeyTableDefaultPageSize:                      "20",
 		SettingKeyTablePageSizeOptions:                      "[10,20,50,100]",
 		SettingKeyCustomMenuItems:                           "[]",
@@ -360,6 +367,13 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		HideCcsImportButton:                    settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:            settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
 		PurchaseSubscriptionURL:                strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
+		ThesisVerticalEnabled:                  settings[SettingKeyThesisVerticalEnabled] == "true",
+		ThesisVerticalBrandDomain:              strings.TrimSpace(settings[SettingKeyThesisVerticalBrandDomain]),
+		ThesisVerticalPrimaryPlanIDs:           parseIntArray(settings[SettingKeyThesisVerticalPrimaryPlanIDs]),
+		ThesisVerticalCodexGuideURL:            strings.TrimSpace(settings[SettingKeyThesisVerticalCodexGuideURL]),
+		ThesisVerticalSkillPackURL:             strings.TrimSpace(settings[SettingKeyThesisVerticalSkillPackURL]),
+		ThesisVerticalSupportDisciplines:       parseStringArray(settings[SettingKeyThesisVerticalSupportDisciplines]),
+		CodexClientSkillsCatalogJSON:           strings.TrimSpace(settings[SettingKeyCodexClientSkillsCatalogJSON]),
 		CustomMenuItems:                        settings[SettingKeyCustomMenuItems],
 		CustomEndpoints:                        settings[SettingKeyCustomEndpoints],
 		BackendModeEnabled:                     settings[SettingKeyBackendModeEnabled] == "true",
@@ -974,6 +988,42 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		EnableCrossClientMap: result.GrokCrossClientModelMapEnabled,
 	})
 
+	return result
+}
+
+func parseIntArray(raw string) []int {
+	var items []int
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return []int{}
+	}
+	return normalizeIntArray(items)
+}
+
+func normalizeIntArray(items []int) []int {
+	result := make([]int, 0, len(items))
+	for _, item := range items {
+		if item > 0 {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func parseStringArray(raw string) []string {
+	var items []string
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return []string{}
+	}
+	return normalizeStringArray(items)
+}
+
+func normalizeStringArray(items []string) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
 	return result
 }
 

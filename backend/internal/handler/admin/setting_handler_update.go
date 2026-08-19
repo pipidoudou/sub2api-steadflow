@@ -153,21 +153,28 @@ type UpdateSettingsRequest struct {
 	GoogleOAuthFrontendRedirectURL string `json:"google_oauth_frontend_redirect_url"`
 
 	// OEM设置
-	SiteName                    string                `json:"site_name"`
-	SiteLogo                    string                `json:"site_logo"`
-	SiteSubtitle                string                `json:"site_subtitle"`
-	APIBaseURL                  string                `json:"api_base_url"`
-	ContactInfo                 string                `json:"contact_info"`
-	DocURL                      string                `json:"doc_url"`
-	HomeContent                 string                `json:"home_content"`
-	CompactHomeEnabled          bool                  `json:"compact_home_enabled"`
-	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
-	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
-	PurchaseSubscriptionURL     *string               `json:"purchase_subscription_url"`
-	TableDefaultPageSize        int                   `json:"table_default_page_size"`
-	TablePageSizeOptions        []int                 `json:"table_page_size_options"`
-	CustomMenuItems             *[]dto.CustomMenuItem `json:"custom_menu_items"`
-	CustomEndpoints             *[]dto.CustomEndpoint `json:"custom_endpoints"`
+	SiteName                         string                `json:"site_name"`
+	SiteLogo                         string                `json:"site_logo"`
+	SiteSubtitle                     string                `json:"site_subtitle"`
+	APIBaseURL                       string                `json:"api_base_url"`
+	ContactInfo                      string                `json:"contact_info"`
+	DocURL                           string                `json:"doc_url"`
+	HomeContent                      string                `json:"home_content"`
+	CompactHomeEnabled               bool                  `json:"compact_home_enabled"`
+	HideCcsImportButton              bool                  `json:"hide_ccs_import_button"`
+	PurchaseSubscriptionEnabled      *bool                 `json:"purchase_subscription_enabled"`
+	PurchaseSubscriptionURL          *string               `json:"purchase_subscription_url"`
+	ThesisVerticalEnabled            *bool                 `json:"thesis_vertical_enabled"`
+	ThesisVerticalBrandDomain        *string               `json:"thesis_vertical_brand_domain"`
+	ThesisVerticalPrimaryPlanIDs     *[]int                `json:"thesis_vertical_primary_plan_ids"`
+	ThesisVerticalCodexGuideURL      *string               `json:"thesis_vertical_codex_guide_url"`
+	ThesisVerticalSkillPackURL       *string               `json:"thesis_vertical_skill_pack_url"`
+	ThesisVerticalSupportDisciplines *[]string             `json:"thesis_vertical_support_disciplines"`
+	CodexClientSkillsCatalogJSON     *string               `json:"codex_client_skills_catalog_json"`
+	TableDefaultPageSize             int                   `json:"table_default_page_size"`
+	TablePageSizeOptions             []int                 `json:"table_page_size_options"`
+	CustomMenuItems                  *[]dto.CustomMenuItem `json:"custom_menu_items"`
+	CustomEndpoints                  *[]dto.CustomEndpoint `json:"custom_endpoints"`
 
 	// 默认配置
 	DefaultConcurrency                        int                               `json:"default_concurrency"`
@@ -1250,6 +1257,33 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	if req.ThesisVerticalBrandDomain != nil {
+		if err := validateThesisBrandDomain(*req.ThesisVerticalBrandDomain); err != nil {
+			response.BadRequest(c, "Thesis Vertical Brand Domain must be a valid host or host:port")
+			return
+		}
+	}
+	for label, value := range map[string]*string{
+		"Thesis Vertical Codex Guide URL": req.ThesisVerticalCodexGuideURL,
+		"Thesis Vertical Skill Pack URL":  req.ThesisVerticalSkillPackURL,
+	} {
+		if value != nil && strings.TrimSpace(*value) != "" {
+			if err := config.ValidateAbsoluteHTTPURL(strings.TrimSpace(*value)); err != nil {
+				response.BadRequest(c, label+" must be an absolute http(s) URL")
+				return
+			}
+		}
+	}
+	codexClientSkillsCatalogJSON := previousSettings.CodexClientSkillsCatalogJSON
+	if req.CodexClientSkillsCatalogJSON != nil {
+		normalized, err := normalizeCodexClientSkillsCatalogJSON(*req.CodexClientSkillsCatalogJSON)
+		if err != nil {
+			response.BadRequest(c, "codex_client_skills_catalog_json "+err.Error())
+			return
+		}
+		codexClientSkillsCatalogJSON = normalized
+	}
+
 	// 自定义菜单项验证
 	const (
 		maxCustomMenuItems    = 20
@@ -1620,30 +1654,67 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		HideCcsImportButton:                    req.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:            purchaseEnabled,
 		PurchaseSubscriptionURL:                purchaseURL,
-		TableDefaultPageSize:                   req.TableDefaultPageSize,
-		TablePageSizeOptions:                   req.TablePageSizeOptions,
-		CustomMenuItems:                        customMenuJSON,
-		CustomEndpoints:                        customEndpointsJSON,
-		DefaultConcurrency:                     req.DefaultConcurrency,
-		DefaultBalance:                         req.DefaultBalance,
-		AffiliateRebateRate:                    affiliateRebateRate,
-		AffiliateRebateFreezeHours:             affiliateRebateFreezeHours,
-		AffiliateRebateDurationDays:            affiliateRebateDurationDays,
-		AffiliateRebatePerInviteeCap:           affiliateRebatePerInviteeCap,
-		AdminRechargeRebateEnabled:             adminRechargeRebateEnabled,
-		DefaultUserRPMLimit:                    req.DefaultUserRPMLimit,
-		DefaultSubscriptions:                   defaultSubscriptions,
-		EnableModelFallback:                    req.EnableModelFallback,
-		FallbackModelAnthropic:                 req.FallbackModelAnthropic,
-		FallbackModelOpenAI:                    req.FallbackModelOpenAI,
-		FallbackModelGemini:                    req.FallbackModelGemini,
-		FallbackModelAntigravity:               req.FallbackModelAntigravity,
-		EnableIdentityPatch:                    req.EnableIdentityPatch,
-		IdentityPatchPrompt:                    req.IdentityPatchPrompt,
-		MinClaudeCodeVersion:                   req.MinClaudeCodeVersion,
-		MaxClaudeCodeVersion:                   req.MaxClaudeCodeVersion,
-		AllowUngroupedKeyScheduling:            req.AllowUngroupedKeyScheduling,
-		BackendModeEnabled:                     req.BackendModeEnabled,
+		ThesisVerticalEnabled: func() bool {
+			if req.ThesisVerticalEnabled != nil {
+				return *req.ThesisVerticalEnabled
+			}
+			return previousSettings.ThesisVerticalEnabled
+		}(),
+		ThesisVerticalBrandDomain: func() string {
+			if req.ThesisVerticalBrandDomain != nil {
+				return strings.TrimSpace(*req.ThesisVerticalBrandDomain)
+			}
+			return previousSettings.ThesisVerticalBrandDomain
+		}(),
+		ThesisVerticalPrimaryPlanIDs: func() []int {
+			if req.ThesisVerticalPrimaryPlanIDs != nil {
+				return append([]int(nil), (*req.ThesisVerticalPrimaryPlanIDs)...)
+			}
+			return append([]int(nil), previousSettings.ThesisVerticalPrimaryPlanIDs...)
+		}(),
+		ThesisVerticalCodexGuideURL: func() string {
+			if req.ThesisVerticalCodexGuideURL != nil {
+				return strings.TrimSpace(*req.ThesisVerticalCodexGuideURL)
+			}
+			return previousSettings.ThesisVerticalCodexGuideURL
+		}(),
+		ThesisVerticalSkillPackURL: func() string {
+			if req.ThesisVerticalSkillPackURL != nil {
+				return strings.TrimSpace(*req.ThesisVerticalSkillPackURL)
+			}
+			return previousSettings.ThesisVerticalSkillPackURL
+		}(),
+		ThesisVerticalSupportDisciplines: func() []string {
+			if req.ThesisVerticalSupportDisciplines != nil {
+				return append([]string(nil), (*req.ThesisVerticalSupportDisciplines)...)
+			}
+			return append([]string(nil), previousSettings.ThesisVerticalSupportDisciplines...)
+		}(),
+		CodexClientSkillsCatalogJSON: codexClientSkillsCatalogJSON,
+		TableDefaultPageSize:         req.TableDefaultPageSize,
+		TablePageSizeOptions:         req.TablePageSizeOptions,
+		CustomMenuItems:              customMenuJSON,
+		CustomEndpoints:              customEndpointsJSON,
+		DefaultConcurrency:           req.DefaultConcurrency,
+		DefaultBalance:               req.DefaultBalance,
+		AffiliateRebateRate:          affiliateRebateRate,
+		AffiliateRebateFreezeHours:   affiliateRebateFreezeHours,
+		AffiliateRebateDurationDays:  affiliateRebateDurationDays,
+		AffiliateRebatePerInviteeCap: affiliateRebatePerInviteeCap,
+		AdminRechargeRebateEnabled:   adminRechargeRebateEnabled,
+		DefaultUserRPMLimit:          req.DefaultUserRPMLimit,
+		DefaultSubscriptions:         defaultSubscriptions,
+		EnableModelFallback:          req.EnableModelFallback,
+		FallbackModelAnthropic:       req.FallbackModelAnthropic,
+		FallbackModelOpenAI:          req.FallbackModelOpenAI,
+		FallbackModelGemini:          req.FallbackModelGemini,
+		FallbackModelAntigravity:     req.FallbackModelAntigravity,
+		EnableIdentityPatch:          req.EnableIdentityPatch,
+		IdentityPatchPrompt:          req.IdentityPatchPrompt,
+		MinClaudeCodeVersion:         req.MinClaudeCodeVersion,
+		MaxClaudeCodeVersion:         req.MaxClaudeCodeVersion,
+		AllowUngroupedKeyScheduling:  req.AllowUngroupedKeyScheduling,
+		BackendModeEnabled:           req.BackendModeEnabled,
 		AllowUserViewErrorRequests: func() bool {
 			if req.AllowUserViewErrorRequests != nil {
 				return *req.AllowUserViewErrorRequests
@@ -2236,6 +2307,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		HideCcsImportButton:                                    updatedSettings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:                            updatedSettings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:                                updatedSettings.PurchaseSubscriptionURL,
+		ThesisVerticalEnabled:                                  updatedSettings.ThesisVerticalEnabled,
+		ThesisVerticalBrandDomain:                              updatedSettings.ThesisVerticalBrandDomain,
+		ThesisVerticalPrimaryPlanIDs:                           updatedSettings.ThesisVerticalPrimaryPlanIDs,
+		ThesisVerticalCodexGuideURL:                            updatedSettings.ThesisVerticalCodexGuideURL,
+		ThesisVerticalSkillPackURL:                             updatedSettings.ThesisVerticalSkillPackURL,
+		ThesisVerticalSupportDisciplines:                       updatedSettings.ThesisVerticalSupportDisciplines,
+		CodexClientSkillsCatalogJSON:                           updatedSettings.CodexClientSkillsCatalogJSON,
 		TableDefaultPageSize:                                   updatedSettings.TableDefaultPageSize,
 		TablePageSizeOptions:                                   updatedSettings.TablePageSizeOptions,
 		CustomMenuItems:                                        dto.ParseCustomMenuItems(updatedSettings.CustomMenuItems),

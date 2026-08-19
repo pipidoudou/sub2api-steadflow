@@ -2,6 +2,7 @@ package admin
 
 import (
 	"log/slog"
+	"reflect"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -343,6 +344,27 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.HideCcsImportButton != after.HideCcsImportButton {
 		changed = append(changed, "hide_ccs_import_button")
+	}
+	if before.ThesisVerticalEnabled != after.ThesisVerticalEnabled {
+		changed = append(changed, "thesis_vertical_enabled")
+	}
+	if before.ThesisVerticalBrandDomain != after.ThesisVerticalBrandDomain {
+		changed = append(changed, "thesis_vertical_brand_domain")
+	}
+	if !reflect.DeepEqual(before.ThesisVerticalPrimaryPlanIDs, after.ThesisVerticalPrimaryPlanIDs) {
+		changed = append(changed, "thesis_vertical_primary_plan_ids")
+	}
+	if before.ThesisVerticalCodexGuideURL != after.ThesisVerticalCodexGuideURL {
+		changed = append(changed, "thesis_vertical_codex_guide_url")
+	}
+	if before.ThesisVerticalSkillPackURL != after.ThesisVerticalSkillPackURL {
+		changed = append(changed, "thesis_vertical_skill_pack_url")
+	}
+	if !reflect.DeepEqual(before.ThesisVerticalSupportDisciplines, after.ThesisVerticalSupportDisciplines) {
+		changed = append(changed, "thesis_vertical_support_disciplines")
+	}
+	if before.CodexClientSkillsCatalogJSON != after.CodexClientSkillsCatalogJSON {
+		changed = append(changed, "codex_client_skills_catalog_json")
 	}
 	if before.DefaultConcurrency != after.DefaultConcurrency {
 		changed = append(changed, "default_concurrency")

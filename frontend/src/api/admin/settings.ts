@@ -481,6 +481,13 @@ export interface SystemSettings {
   home_content: string;
   compact_home_enabled: boolean;
   hide_ccs_import_button: boolean;
+  thesis_vertical_enabled: boolean;
+  thesis_vertical_brand_domain: string;
+  thesis_vertical_primary_plan_ids: number[];
+  thesis_vertical_codex_guide_url: string;
+  thesis_vertical_skill_pack_url: string;
+  thesis_vertical_support_disciplines: string[];
+  codex_client_skills_catalog_json: string;
   table_default_page_size: number;
   table_page_size_options: number[];
   backend_mode_enabled: boolean;
@@ -819,6 +826,13 @@ export interface UpdateSettingsRequest {
   home_content?: string;
   compact_home_enabled?: boolean;
   hide_ccs_import_button?: boolean;
+  thesis_vertical_enabled?: boolean;
+  thesis_vertical_brand_domain?: string;
+  thesis_vertical_primary_plan_ids?: number[];
+  thesis_vertical_codex_guide_url?: string;
+  thesis_vertical_skill_pack_url?: string;
+  thesis_vertical_support_disciplines?: string[];
+  codex_client_skills_catalog_json?: string;
   table_default_page_size?: number;
   table_page_size_options?: number[];
   backend_mode_enabled?: boolean;
@@ -1036,6 +1050,63 @@ export interface UpdateSettingsRequest {
   allow_user_view_error_requests?: boolean;
 }
 
+export interface UploadSkillPackArchiveResponse {
+  install_pack_id: string;
+  version: string;
+  entry_dir: string;
+  archive_url: string;
+  manifest_url: string;
+  checksum_sha256: string;
+  archive_file_name: string;
+  manifest_name: string;
+  pack_name?: string;
+  pack_summary?: string;
+  root_skill_name?: string;
+  root_skill_description?: string;
+}
+
+export interface ClientReleaseAssetConfig {
+  name: string;
+  url: string;
+}
+
+export interface ClientReleaseConfig {
+  version: string;
+  url: string;
+  body: string;
+  assets: ClientReleaseAssetConfig[];
+}
+
+export interface UploadClientReleaseAssetResponse {
+  file_name: string;
+  url: string;
+  checksum_sha256: string;
+}
+
+export interface ScriptMarketScriptConfig {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  tags: string[];
+  homepage: string;
+  script_url: string;
+  sha256: string;
+}
+
+export interface ScriptMarketIndexConfig {
+  version: number;
+  updated_at: string;
+  scripts: ScriptMarketScriptConfig[];
+}
+
+export interface UploadScriptMarketAssetResponse {
+  file_name: string;
+  script_url: string;
+  checksum_sha256: string;
+}
+
 /**
  * Get all system settings
  * @returns System settings
@@ -1056,6 +1127,67 @@ export async function updateSettings(
   const { data } = await apiClient.put<SystemSettings>(
     "/admin/settings",
     settings,
+  );
+  return data;
+}
+
+export async function uploadSkillPackArchive(input: {
+  install_pack_id: string;
+  version: string;
+  entry_dir?: string;
+  archive: File;
+}): Promise<UploadSkillPackArchiveResponse> {
+  const formData = new FormData();
+  formData.append("install_pack_id", input.install_pack_id);
+  formData.append("version", input.version);
+  if (input.entry_dir?.trim()) formData.append("entry_dir", input.entry_dir.trim());
+  formData.append("archive", input.archive);
+  const { data } = await apiClient.post<UploadSkillPackArchiveResponse>(
+    "/admin/settings/skills-packs/upload",
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data;
+}
+
+export async function getClientReleaseConfig(): Promise<ClientReleaseConfig> {
+  const { data } = await apiClient.get<ClientReleaseConfig>("/admin/settings/client-release");
+  return data;
+}
+
+export async function updateClientReleaseConfig(input: ClientReleaseConfig): Promise<ClientReleaseConfig> {
+  const { data } = await apiClient.put<ClientReleaseConfig>("/admin/settings/client-release", input);
+  return data;
+}
+
+export async function uploadClientReleaseAsset(input: { asset: File }): Promise<UploadClientReleaseAssetResponse> {
+  const formData = new FormData();
+  formData.append("asset", input.asset);
+  const { data } = await apiClient.post<UploadClientReleaseAssetResponse>(
+    "/admin/settings/client-release/upload",
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data;
+}
+
+export async function getScriptMarketConfig(): Promise<ScriptMarketIndexConfig> {
+  const { data } = await apiClient.get<ScriptMarketIndexConfig>("/admin/settings/script-market");
+  return data;
+}
+
+export async function updateScriptMarketConfig(input: ScriptMarketIndexConfig): Promise<ScriptMarketIndexConfig> {
+  const { data } = await apiClient.put<ScriptMarketIndexConfig>("/admin/settings/script-market", input);
+  return data;
+}
+
+export async function uploadScriptMarketAsset(input: { script: File }): Promise<UploadScriptMarketAssetResponse> {
+  const formData = new FormData();
+  formData.append("script", input.script);
+  const { data } = await apiClient.post<UploadScriptMarketAssetResponse>(
+    "/admin/settings/script-market/upload",
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
   );
   return data;
 }

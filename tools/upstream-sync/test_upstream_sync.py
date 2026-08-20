@@ -1,28 +1,277 @@
+import atexit
+import contextlib
+import ctypes
+import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
+import shlex
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
+# Normalize Apple Python's external cache prefix so the black-box regression
+# exercises the ordinary checkout-local bytecode behavior seen in CI/review.
+sys.pycache_prefix = None
 MODULE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = MODULE_DIR.parents[1]
+
+
+def _darwin_process_start_ns():
+    class ProcBsdInfo(ctypes.Structure):
+        _fields_ = [
+            ("pbi_flags", ctypes.c_uint32),
+            ("pbi_status", ctypes.c_uint32),
+            ("pbi_xstatus", ctypes.c_uint32),
+            ("pbi_pid", ctypes.c_uint32),
+            ("pbi_ppid", ctypes.c_uint32),
+            ("pbi_uid", ctypes.c_uint32),
+            ("pbi_gid", ctypes.c_uint32),
+            ("pbi_ruid", ctypes.c_uint32),
+            ("pbi_rgid", ctypes.c_uint32),
+            ("pbi_svuid", ctypes.c_uint32),
+            ("pbi_svgid", ctypes.c_uint32),
+            ("rfu_1", ctypes.c_uint32),
+            ("pbi_comm", ctypes.c_char * 16),
+            ("pbi_name", ctypes.c_char * 32),
+            ("pbi_nfiles", ctypes.c_uint32),
+            ("pbi_pgid", ctypes.c_uint32),
+            ("pbi_pjobc", ctypes.c_uint32),
+            ("e_tdev", ctypes.c_uint32),
+            ("e_tpgid", ctypes.c_uint32),
+            ("pbi_nice", ctypes.c_int32),
+            ("pbi_start_tvsec", ctypes.c_uint64),
+            ("pbi_start_tvusec", ctypes.c_uint64),
+        ]
+
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    proc_pidinfo = libproc.proc_pidinfo
+    proc_pidinfo.argtypes = (
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    )
+    proc_pidinfo.restype = ctypes.c_int
+    info = ProcBsdInfo()
+    size = ctypes.sizeof(info)
+    if proc_pidinfo(os.getpid(), 3, 0, ctypes.byref(info), size) != size:
+        return None
+    return info.pbi_start_tvsec * 1_000_000_000 + info.pbi_start_tvusec * 1_000
+
+
+def _linux_process_start_upper_bound_ns():
+    stat_fields = Path("/proc/self/stat").read_text(encoding="ascii").split()
+    start_ticks = int(stat_fields[21])
+    ticks_per_second = os.sysconf("SC_CLK_TCK")
+    boottime = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+    realtime_after = time.time_ns()
+    realtime_minus_boottime_upper = realtime_after - boottime
+    return realtime_minus_boottime_upper + (
+        start_ticks * 1_000_000_000 // ticks_per_second
+    )
+
+
+def _process_start_time_ns():
+    try:
+        if sys.platform == "darwin":
+            return _darwin_process_start_ns()
+        if sys.platform.startswith("linux"):
+            return _linux_process_start_upper_bound_ns()
+    except (OSError, ValueError, AttributeError):
+        return None
+    return None
+
+
+def _cache_was_created_by_current_process(cache_path):
+    process_start_ns = _process_start_time_ns()
+    if process_start_ns is None:
+        return False
+    cache_stat = cache_path.stat()
+    if sys.platform == "darwin":
+        created_ns = int(cache_stat.st_birthtime * 1_000_000_000)
+    elif sys.platform.startswith("linux"):
+        created_ns = cache_stat.st_ctime_ns
+    else:
+        return False
+    return created_ns > process_start_ns
+
+
+_CACHED_TEST_MODULE = Path(globals().get("__cached__", ""))
+_CACHED_TEST_MODULE_CREATED_BY_SUITE = False
+if _CACHED_TEST_MODULE.name and _CACHED_TEST_MODULE.exists():
+    _CACHED_TEST_MODULE_CREATED_BY_SUITE = (
+        _CACHED_TEST_MODULE.parent.resolve() == (MODULE_DIR / "__pycache__").resolve()
+        and _cache_was_created_by_current_process(_CACHED_TEST_MODULE)
+    )
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(MODULE_DIR))
 
 from upstream_sync import (
     audit_migrations,
+    create_upgrade_candidate,
+    GitRepository,
     ManifestValidationError,
     MigrationValidationError,
     OWNER_LAYER_KEYS,
+    UpgradeBlocked,
     load_json_document,
     migration_checksums,
+    resume_upgrade,
     validate_manifest,
     validate_migrations,
 )
+
+
+def _cleanup_suite_cache(cache_path, *, created_by_suite):
+    """Remove only bytecode proven to have been created by this suite run."""
+    cache_path = Path(cache_path)
+    if not created_by_suite:
+        return
+    with contextlib.suppress(FileNotFoundError):
+        cache_path.unlink()
+    cache_directory = cache_path.parent
+    with contextlib.suppress(FileNotFoundError, OSError):
+        cache_directory.rmdir()
+
+
+atexit.register(
+    _cleanup_suite_cache,
+    _CACHED_TEST_MODULE,
+    created_by_suite=_CACHED_TEST_MODULE_CREATED_BY_SUITE,
+)
+
+
+PROTECTED_REPO_ROOT = Path(
+    os.environ.get("STEADFLOW_PROTECTED_REPO_ROOT", REPO_ROOT)
+).resolve()
+_PROTECTED_REPO_BEFORE = None
+
+
+def protected_repo_snapshot(root=PROTECTED_REPO_ROOT):
+    environment = {
+        "PATH": os.environ["PATH"],
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+    }
+
+    def git_bytes(*arguments):
+        return subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            env=environment,
+            check=True,
+            capture_output=True,
+        ).stdout
+
+    common = Path(git_bytes("rev-parse", "--git-common-dir").decode().strip())
+    if not common.is_absolute():
+        common = root / common
+    config_path = common.resolve() / "config"
+    state_path = common.resolve() / "steadflow-upstream-sync" / "state.json"
+    return {
+        "config": config_path.read_bytes(),
+        "head": git_bytes("rev-parse", "HEAD"),
+        "index": (common.resolve() / "index").read_bytes(),
+        "refs": git_bytes(
+            "for-each-ref", "--format=%(refname) %(objectname)"
+        ),
+        "remotes": git_bytes("remote", "-v"),
+        "status": git_bytes("status", "--porcelain=v2", "-z"),
+        "steadflow_state": state_path.read_bytes() if state_path.is_file() else None,
+        "worktrees": git_bytes("worktree", "list", "--porcelain"),
+    }
+
+
+def setUpModule():
+    global _PROTECTED_REPO_BEFORE
+    _PROTECTED_REPO_BEFORE = protected_repo_snapshot()
+
+
+def tearDownModule():
+    after = protected_repo_snapshot()
+    changed = sorted(
+        key for key, value in _PROTECTED_REPO_BEFORE.items() if after[key] != value
+    )
+    if changed:
+        raise AssertionError(
+            "protected repository changed during test suite: " + ", ".join(changed)
+        )
+
+
+class UpgradeWrapperTests(unittest.TestCase):
+    def run_wrapper(self, *arguments, cwd=None):
+        return subprocess.run(
+            [str(MODULE_DIR / "upgrade"), *arguments],
+            cwd=cwd or REPO_ROOT,
+            env={
+                "PATH": os.environ["PATH"],
+                "LANG": "C",
+                "LC_ALL": "C",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+            },
+            capture_output=True,
+            text=True,
+        )
+
+    def test_wrapper_is_strict_executable_and_delegates_to_sibling_module(self):
+        wrapper = MODULE_DIR / "upgrade"
+
+        self.assertTrue(wrapper.is_file(), "upgrade wrapper must exist")
+        self.assertEqual(
+            wrapper.read_text(encoding="utf-8"),
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+            'exec python3 "$SCRIPT_DIR/upstream_sync.py" "$@"\n',
+        )
+        self.assertEqual(wrapper.stat().st_mode & 0o777, 0o755)
+
+    def test_help_documents_exactly_the_three_modes(self):
+        completed = self.run_wrapper("--help")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("upgrade vX.Y.Z", completed.stdout)
+        self.assertIn("upgrade --continue", completed.stdout)
+        self.assertIn("upgrade --verify-current", completed.stdout)
+
+    def test_invalid_release_and_argument_shapes_fail_before_git_access(self):
+        invalid_argv = (
+            (),
+            ("",),
+            ("v1.2",),
+            ("v1.2.3-rc1",),
+            ("v01.2.3",),
+            ("v1.02.3",),
+            ("v1.2.03",),
+            ("v1.2.3/../../escape",),
+            (" v1.2.3",),
+            ("v1.2.3 ",),
+            ("v1.2.3", "extra"),
+            ("--continue", "v1.2.3"),
+            ("--verify-current", "v1.2.3"),
+            ("--continue", "--verify-current"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for arguments in invalid_argv:
+                with self.subTest(arguments=arguments):
+                    completed = self.run_wrapper(*arguments, cwd=directory)
+
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertNotIn("not a git repository", completed.stderr)
 
 
 def manifest_with_paths(**layers):
@@ -314,6 +563,26 @@ class OwnershipManifestTests(unittest.TestCase):
                 with self.assertRaisesRegex(ManifestValidationError, message):
                     validate_manifest(manifest, ["data/README.md"])
 
+    def test_owner_layers_reject_nested_extra_keys(self):
+        manifest = manifest_with_paths(data=["data/README.md"])
+        manifest["data"]["note"] = "not part of the schema"
+
+        with self.assertRaisesRegex(
+            ManifestValidationError,
+            r"data keys must be paths",
+        ):
+            validate_manifest(manifest, ["data/README.md"])
+
+    def test_generated_rejects_nested_extra_keys(self):
+        manifest = manifest_with_paths(data=["data/README.md"])
+        manifest["generated"]["shell"] = True
+
+        with self.assertRaisesRegex(
+            ManifestValidationError,
+            r"generated keys must be commands and paths",
+        ):
+            validate_manifest(manifest, ["data/README.md"])
+
     def test_command_objects_reject_invalid_name_cwd_and_extra_keys(self):
         cases = (
             (
@@ -352,6 +621,29 @@ class JsonDocumentTests(unittest.TestCase):
             path.write_text('{"schema_version": 1}\n', encoding="utf-8")
 
             self.assertEqual(load_json_document(path), {"schema_version": 1})
+
+    def test_load_json_document_rejects_duplicate_keys_at_any_depth(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "customization.yml"
+            path.write_text(
+                '{"generated": {"paths": [], "paths": ["other"]}}\n',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, r"duplicate JSON key: paths"):
+                load_json_document(path)
+
+    def test_load_json_document_requires_object_root(self):
+        for label, document in (("array", "[]\n"), ("null", "null\n")):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "document.json"
+                path.write_text(document, encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"JSON document root must be an object",
+                ):
+                    load_json_document(path)
 
 
 class MigrationIntegrityTests(unittest.TestCase):
@@ -706,6 +998,56 @@ class MigrationIntegrityTests(unittest.TestCase):
 
 
 class RepositoryBaselineTests(unittest.TestCase):
+    go_discovery_root = REPO_ROOT
+
+    @classmethod
+    def setUpClass(cls):
+        cls.git_fixture_directory = tempfile.TemporaryDirectory()
+        cls.go_discovery_root = (
+            Path(cls.git_fixture_directory.name) / "repository-clone"
+        )
+        environment = dict(os.environ)
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--quiet",
+                "--no-local",
+                str(REPO_ROOT),
+                str(cls.go_discovery_root),
+            ],
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        for key, value in (
+            ("user.name", "Steadflow Test"),
+            ("user.email", "steadflow-test@example.invalid"),
+        ):
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(cls.go_discovery_root),
+                    "config",
+                    "--local",
+                    key,
+                    value,
+                ],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.git_fixture_directory.cleanup()
+
     def load_deterministic_json(self, relative_path, root=REPO_ROOT):
         path = root / relative_path
         text = path.read_text(encoding="utf-8")
@@ -940,8 +1282,53 @@ class RepositoryBaselineTests(unittest.TestCase):
                 dist.rmdir()
         return list_argv, completed
 
+    def test_go_discovery_uses_disposable_clone_and_preserves_primary_dist(self):
+        primary_dist = REPO_ROOT / "backend" / "internal" / "web" / "dist"
+        before = (
+            primary_dist.exists(),
+            sorted(
+                (path.relative_to(primary_dist).as_posix(), path.read_bytes())
+                for path in primary_dist.rglob("*")
+                if path.is_file()
+            )
+            if primary_dist.exists()
+            else [],
+        )
+
+        self.assertNotEqual(
+            self.go_discovery_root.resolve(),
+            REPO_ROOT.resolve(),
+            "Go discovery must not run in the primary checkout",
+        )
+        manifest = self.load_deterministic_json(
+            ".steadflow/customization.yml", self.go_discovery_root
+        )
+        web_command = next(
+            command
+            for command in manifest["critical_commands"]
+            if command["name"] == "backend_seo_public"
+        )
+        _, completed = self.run_go_critical_command_discovery(
+            web_command, self.go_discovery_root
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        after = (
+            primary_dist.exists(),
+            sorted(
+                (path.relative_to(primary_dist).as_posix(), path.read_bytes())
+                for path in primary_dist.rglob("*")
+                if path.is_file()
+            )
+            if primary_dist.exists()
+            else [],
+        )
+        self.assertEqual(after, before)
+
     def test_every_go_critical_command_lists_real_tests(self):
-        manifest = self.load_deterministic_json(".steadflow/customization.yml")
+        manifest = self.load_deterministic_json(
+            ".steadflow/customization.yml", self.go_discovery_root
+        )
         go_commands = [
             command
             for command in manifest["critical_commands"]
@@ -952,7 +1339,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         for command in go_commands:
             with self.subTest(command=command["name"]):
                 list_argv, completed = self.run_go_critical_command_discovery(
-                    command, REPO_ROOT
+                    command, self.go_discovery_root
                 )
                 diagnostic = (
                     f"name={command['name']} argv={list_argv!r} "
@@ -965,43 +1352,32 @@ class RepositoryBaselineTests(unittest.TestCase):
                 )
 
     def test_web_discovery_is_portable_without_persisting_embed_artifacts(self):
-        with tempfile.TemporaryDirectory() as directory:
-            clone = Path(directory) / "fresh-clone"
-            environment = dict(os.environ)
-            environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
-            environment["GIT_CONFIG_NOSYSTEM"] = "1"
-            subprocess.run(
-                ["git", "clone", "--quiet", "--no-local", str(REPO_ROOT), str(clone)],
-                env=environment,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            manifest = self.load_deterministic_json(
-                ".steadflow/customization.yml", clone
-            )
-            command = next(
-                command
-                for command in manifest["critical_commands"]
-                if command["name"] == "backend_seo_public"
-            )
-            dist = clone / "backend" / "internal" / "web" / "dist"
-            self.assertFalse(dist.exists())
-            list_argv, completed = self.run_go_critical_command_discovery(
-                command, clone
-            )
+        manifest = self.load_deterministic_json(
+            ".steadflow/customization.yml", self.go_discovery_root
+        )
+        command = next(
+            command
+            for command in manifest["critical_commands"]
+            if command["name"] == "backend_seo_public"
+        )
+        dist = (
+            self.go_discovery_root / "backend" / "internal" / "web" / "dist"
+        )
+        self.assertFalse(dist.exists())
+        list_argv, completed = self.run_go_critical_command_discovery(
+            command, self.go_discovery_root
+        )
 
-            diagnostic = (
-                f"name={command['name']} argv={list_argv!r} "
-                f"exit={completed.returncode}\nstdout:\n{completed.stdout}\n"
-                f"stderr:\n{completed.stderr}"
-            )
-            self.assertEqual(completed.returncode, 0, diagnostic)
-            self.assertIsNotNone(
-                re.search(r"(?m)^Test\S+$", completed.stdout), diagnostic
-            )
-            self.assertFalse(dist.exists())
+        diagnostic = (
+            f"name={command['name']} argv={list_argv!r} "
+            f"exit={completed.returncode}\nstdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+        self.assertEqual(completed.returncode, 0, diagnostic)
+        self.assertIsNotNone(
+            re.search(r"(?m)^Test\S+$", completed.stdout), diagnostic
+        )
+        self.assertFalse(dist.exists())
 
     def assert_upstream_lock_matches_git_objects(self, root):
         lock = self.load_deterministic_json(".steadflow/upstream-lock.json", root)
@@ -1027,22 +1403,9 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assert_upstream_lock_matches_git_objects(REPO_ROOT)
 
     def test_upstream_lock_validation_is_portable_to_origin_only_clone(self):
-        with tempfile.TemporaryDirectory() as directory:
-            clone = Path(directory) / "fresh-clone"
-            environment = dict(os.environ)
-            environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
-            environment["GIT_CONFIG_NOSYSTEM"] = "1"
-            subprocess.run(
-                ["git", "clone", "--quiet", "--no-local", str(REPO_ROOT), str(clone)],
-                env=environment,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            self.assertEqual(self.git("remote", root=clone), "origin")
+        self.assertEqual(self.git("remote", root=self.go_discovery_root), "origin")
 
-            self.assert_upstream_lock_matches_git_objects(clone)
+        self.assert_upstream_lock_matches_git_objects(self.go_discovery_root)
 
     def test_migration_baseline_matches_every_current_sql_file(self):
         baseline = self.load_deterministic_json(
@@ -1066,6 +1429,2174 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertEqual(report["changed"], [])
         self.assertEqual(report["deleted"], [])
         self.assertEqual(report["added"], [])
+
+
+_EXPLICIT_FIXTURE_GIT_ROOT_REQUIRED = object()
+
+
+class HermeticUpgradeFixture:
+    current_release = "v1.0.0"
+
+    def __init__(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.official = self.root / "official-working"
+        self.upstream_bare = self.root / "official-upstream.git"
+        self.fork = self.root / "fork-working"
+        self.origin_bare = self.root / "fork-origin.git"
+        self.trace_path = self.root / "git-trace.jsonl"
+        self.environment = {
+            "PATH": os.environ["PATH"],
+            "LANG": "C",
+            "LC_ALL": "C",
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+        self.run_git(
+            "init",
+            "--quiet",
+            "--initial-branch=main",
+            str(self.official),
+            root=None,
+        )
+        self.configure_identity(self.official)
+        (self.official / "backend" / "migrations").mkdir(parents=True)
+        (self.official / "backend" / "migrations" / "001_initial.sql").write_text(
+            "SELECT 1;\n", encoding="utf-8"
+        )
+        (self.official / "shared.txt").write_text("base\n", encoding="utf-8")
+        self.run_git("add", ".", root=self.official)
+        self.run_git("commit", "-m", "official base", root=self.official)
+        self.current_commit = self.run_git(
+            "rev-parse", "HEAD", root=self.official
+        ).stdout.strip()
+        self.current_tree = self.run_git(
+            "rev-parse", "HEAD^{tree}", root=self.official
+        ).stdout.strip()
+        self.run_git(
+            "tag",
+            "-a",
+            self.current_release,
+            "-m",
+            self.current_release,
+            root=self.official,
+        )
+        self.run_git(
+            "clone",
+            "--quiet",
+            "--bare",
+            "--no-local",
+            str(self.official),
+            str(self.upstream_bare),
+            root=None,
+        )
+        self.run_git(
+            "remote", "add", "upstream", str(self.upstream_bare), root=self.official
+        )
+        self.run_git(
+            "clone",
+            "--quiet",
+            "--no-local",
+            str(self.official),
+            str(self.fork),
+            root=None,
+        )
+        self.configure_identity(self.fork)
+        self.write_steadflow_configuration()
+        (self.fork / ".gitignore").write_text(
+            ".worktrees/\n", encoding="utf-8"
+        )
+        (self.fork / "fork.txt").write_text("steadflow\n", encoding="utf-8")
+        self.run_git("add", ".", root=self.fork)
+        self.run_git("commit", "-m", "steadflow customization", root=self.fork)
+        self.source_commit = self.run_git(
+            "rev-parse", "HEAD", root=self.fork
+        ).stdout.strip()
+        self.run_git(
+            "clone",
+            "--quiet",
+            "--bare",
+            "--no-local",
+            str(self.fork),
+            str(self.origin_bare),
+            root=None,
+        )
+        self.run_git(
+            "remote", "set-url", "origin", str(self.origin_bare), root=self.fork
+        )
+        self.run_git(
+            "remote", "add", "upstream", str(self.upstream_bare), root=self.fork
+        )
+
+    def cleanup(self):
+        self.temporary_directory.cleanup()
+
+    def configure_identity(self, root):
+        self.run_git(
+            "config", "--local", "user.name", "Steadflow Fixture", root=root
+        )
+        self.run_git(
+            "config",
+            "--local",
+            "user.email",
+            "steadflow-fixture@example.invalid",
+            root=root,
+        )
+
+    def run_git(
+        self,
+        *arguments,
+        root=_EXPLICIT_FIXTURE_GIT_ROOT_REQUIRED,
+        check=True,
+        input_text=None,
+    ):
+        assert root is not _EXPLICIT_FIXTURE_GIT_ROOT_REQUIRED, (
+            "fixture Git calls must pass root explicitly"
+        )
+        argv = ["git"]
+        if root is not None:
+            argv.extend(("-C", str(root)))
+        argv.extend(arguments)
+        return subprocess.run(
+            argv,
+            env=self.environment,
+            check=check,
+            input=input_text,
+            capture_output=True,
+            text=True,
+        )
+
+    def write_json(self, relative_path, document):
+        path = self.fork / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def write_steadflow_configuration(self):
+        manifest = manifest_with_paths(data=["fork.txt"])
+        self.write_json(".steadflow/customization.yml", manifest)
+        migration = self.fork / "backend" / "migrations" / "001_initial.sql"
+        self.write_json(
+            ".steadflow/migration-checksums.json",
+            {
+                "algorithm": "sha256",
+                "migrations": {
+                    "backend/migrations/001_initial.sql": hashlib.sha256(
+                        migration.read_bytes()
+                    ).hexdigest()
+                },
+                "schema_version": 1,
+            },
+        )
+        self.write_json(
+            ".steadflow/upstream-lock.json",
+            {
+                "peeled_commit": self.current_commit,
+                "release": self.current_release,
+                "remote": "upstream",
+                "repository": str(self.upstream_bare),
+                "schema_version": 1,
+                "tree": self.current_tree,
+            },
+        )
+
+    def run_upgrade(self, *arguments, cwd=None):
+        if self.trace_path.exists():
+            self.trace_path.unlink()
+        environment = dict(self.environment)
+        environment["GIT_TRACE2_EVENT"] = str(self.trace_path)
+        return subprocess.run(
+            [str(MODULE_DIR / "upgrade"), *arguments],
+            cwd=cwd or self.fork,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+    def source_snapshot(self):
+        return (
+            self.run_git("rev-parse", "HEAD", root=self.fork).stdout,
+            self.run_git(
+                "status", "--porcelain=v2", "-z", root=self.fork
+            ).stdout,
+            self.run_git("ls-files", "--stage", "-z", root=self.fork).stdout,
+        )
+
+    def origin_refs(self):
+        return self.run_git(
+            "--git-dir",
+            str(self.origin_bare),
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            root=None,
+        ).stdout
+
+    @property
+    def state_path(self):
+        common = self.run_git(
+            "rev-parse", "--git-common-dir", root=self.fork
+        ).stdout.strip()
+        common_path = Path(common)
+        if not common_path.is_absolute():
+            common_path = self.fork / common_path
+        return common_path.resolve() / "steadflow-upstream-sync" / "state.json"
+
+    @contextlib.contextmanager
+    def hold_upgrade_lock(self):
+        state_directory = self.state_path.parent
+        state_directory.mkdir(mode=0o700, exist_ok=True)
+        lock_path = state_directory / "upgrade.lock"
+        with lock_path.open("a+b") as lock_file:
+            lock_path.chmod(0o600)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def worktree_path(self, release):
+        return self.fork / ".worktrees" / f"upgrade-{release}"
+
+    def completed_state_path(self, release):
+        return self.state_path.parent / f"completed-{release}.json"
+
+    def environment_with_preflight_barrier(self, marker):
+        real_git = shutil.which("git", path=self.environment["PATH"])
+        if real_git is None:
+            raise AssertionError("fixture Git executable is missing")
+        observer_directory = self.root / "git-preflight-observer"
+        observer_directory.mkdir()
+        observer = observer_directory / "git"
+        observer.write_text(
+            "#!/bin/sh\n"
+            "case \" $* \" in\n"
+            f"  *\" remote get-url upstream \"*) : > {shlex.quote(str(marker))};;\n"
+            "esac\n"
+            f"exec {shlex.quote(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        observer.chmod(0o755)
+        environment = dict(self.environment)
+        environment["PATH"] = (
+            str(observer_directory) + os.pathsep + environment["PATH"]
+        )
+        return environment
+
+    def add_release(self, release, *, annotated=True, conflict=False):
+        relative = "shared.txt" if conflict else f"upstream-{release}.txt"
+        (self.official / relative).write_text(
+            f"official {release}\n", encoding="utf-8"
+        )
+        self.run_git("add", relative, root=self.official)
+        self.run_git("commit", "-m", f"official {release}", root=self.official)
+        commit = self.run_git("rev-parse", "HEAD", root=self.official).stdout.strip()
+        if annotated:
+            self.run_git(
+                "tag", "-a", release, "-m", release, root=self.official
+            )
+        else:
+            self.run_git("tag", release, root=self.official)
+        tag_object = self.run_git(
+            "rev-parse", f"refs/tags/{release}", root=self.official
+        ).stdout.strip()
+        self.run_git(
+            "push",
+            "--quiet",
+            "upstream",
+            "HEAD:refs/heads/main",
+            f"refs/tags/{release}:refs/tags/{release}",
+            root=self.official,
+        )
+        return commit, tag_object
+
+    def create_source_conflict(self):
+        (self.fork / "shared.txt").write_text(
+            "steadflow source\n", encoding="utf-8"
+        )
+        self.run_git("add", "shared.txt", root=self.fork)
+        self.run_git(
+            "commit", "-m", "steadflow shared customization", root=self.fork
+        )
+        self.source_commit = self.run_git(
+            "rev-parse", "HEAD", root=self.fork
+        ).stdout.strip()
+
+    def update_lock(self, **updates):
+        lock_path = self.fork / ".steadflow" / "upstream-lock.json"
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        lock.update(updates)
+        self.write_json(".steadflow/upstream-lock.json", lock)
+        self.run_git("add", ".steadflow/upstream-lock.json", root=self.fork)
+        self.run_git("commit", "-m", "update fixture lock", root=self.fork)
+        self.source_commit = self.run_git(
+            "rev-parse", "HEAD", root=self.fork
+        ).stdout.strip()
+
+    def add_noncommit_release(self, release):
+        blob = self.run_git(
+            "hash-object",
+            "-w",
+            "--stdin",
+            root=self.official,
+            input_text="not a commit\n",
+        ).stdout.strip()
+        self.run_git(
+            "update-ref", f"refs/tags/{release}", blob, root=self.official
+        )
+        self.run_git(
+            "push",
+            "--quiet",
+            "upstream",
+            f"refs/tags/{release}:refs/tags/{release}",
+            root=self.official,
+        )
+        return blob
+
+    def move_release_tag(self, release):
+        relative = f"moved-{release}.txt"
+        (self.official / relative).write_text("moved tag\n", encoding="utf-8")
+        self.run_git("add", relative, root=self.official)
+        self.run_git("commit", "-m", f"move {release}", root=self.official)
+        self.run_git(
+            "tag", "-f", "-a", release, "-m", f"moved {release}",
+            root=self.official,
+        )
+        moved_object = self.run_git(
+            "rev-parse", f"refs/tags/{release}", root=self.official
+        ).stdout.strip()
+        self.run_git(
+            "push",
+            "--quiet",
+            "--force",
+            "upstream",
+            f"refs/tags/{release}:refs/tags/{release}",
+            root=self.official,
+        )
+        return moved_object
+
+    def read_state(self):
+        return json.loads(self.state_path.read_text(encoding="utf-8"))
+
+    def trace_argv(self):
+        commands = []
+        for line in self.trace_path.read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            if event.get("event") == "child_start" and "argv" in event:
+                commands.append(event["argv"])
+        return commands
+
+
+class UpgradeCurrentVerificationTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_verify_current_is_read_only_and_reports_validation_scope(self):
+        source_before = self.fixture.source_snapshot()
+        origin_before = self.fixture.origin_refs()
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("PASS", completed.stdout)
+        self.assertIn("added migrations: none", completed.stdout)
+        self.assertIn("manifest internal ownership only", completed.stdout)
+        self.assertIn("customization_sha256=", completed.stdout)
+        self.assertEqual(self.fixture.source_snapshot(), source_before)
+        self.assertEqual(self.fixture.origin_refs(), origin_before)
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertFalse((self.fixture.fork / ".worktrees").exists())
+
+    def test_current_locked_release_is_verified_no_op_without_fetch_or_state(self):
+        source_before = self.fixture.source_snapshot()
+        origin_before = self.fixture.origin_refs()
+
+        completed = self.fixture.run_upgrade(self.fixture.current_release)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("already current", completed.stdout)
+        self.assertEqual(self.fixture.source_snapshot(), source_before)
+        self.assertEqual(self.fixture.origin_refs(), origin_before)
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertFalse((self.fixture.fork / ".worktrees").exists())
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/steadflow-upstream/releases/{self.fixture.current_release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_verify_current_reports_added_migration_without_blocking(self):
+        added = self.fixture.fork / "backend" / "migrations" / "002_added.sql"
+        added.write_text("SELECT 2;\n", encoding="utf-8")
+        self.fixture.run_git("add", str(added), root=self.fixture.fork)
+        self.fixture.run_git(
+            "commit", "-m", "add fixture migration", root=self.fixture.fork
+        )
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("backend/migrations/002_added.sql", completed.stdout)
+
+    def test_verify_current_uses_repo_root_when_invoked_from_subdirectory(self):
+        source_before = self.fixture.source_snapshot()
+
+        completed = self.fixture.run_upgrade(
+            "--verify-current", cwd=self.fixture.fork / "backend"
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.fixture.source_snapshot(), source_before)
+        self.assertFalse(self.fixture.state_path.exists())
+
+    def test_verify_current_does_not_refresh_index_after_tracked_file_mtime_change(self):
+        tracked = self.fixture.fork / "fork.txt"
+        original_stat = tracked.stat()
+        os.utime(
+            tracked,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1_000_000_000),
+        )
+        index_path = self.fixture.fork / ".git" / "index"
+        index_before = index_path.read_bytes()
+        protected_before = {
+            "config": (self.fixture.fork / ".git" / "config").read_bytes(),
+            "refs": self.fixture.run_git(
+                "for-each-ref", "--format=%(refname) %(objectname)",
+                root=self.fixture.fork,
+            ).stdout,
+            "worktrees": self.fixture.run_git(
+                "worktree", "list", "--porcelain", root=self.fixture.fork
+            ).stdout,
+        }
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(index_path.read_bytes(), index_before)
+        self.assertEqual(
+            (self.fixture.fork / ".git" / "config").read_bytes(),
+            protected_before["config"],
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "for-each-ref", "--format=%(refname) %(objectname)",
+                root=self.fixture.fork,
+            ).stdout,
+            protected_before["refs"],
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "worktree", "list", "--porcelain", root=self.fixture.fork
+            ).stdout,
+            protected_before["worktrees"],
+        )
+
+
+class UpgradeCleanMergeTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_annotated_release_creates_isolated_merge_candidate_only(self):
+        release = "v1.1.0"
+        target_commit, tag_object = self.fixture.add_release(release)
+        source_before = self.fixture.source_snapshot()
+        origin_before = self.fixture.origin_refs()
+        local_tag_before = self.fixture.run_git(
+            "show-ref", "--verify", f"refs/tags/{release}",
+            root=self.fixture.fork,
+            check=False,
+        ).returncode
+        self.assertNotEqual(local_tag_before, 0)
+
+        repository = GitRepository(self.fixture.fork)
+        candidate_state = create_upgrade_candidate(repository, release)
+
+        self.assertEqual(candidate_state["phase"], "merged")
+        self.assertEqual(self.fixture.source_snapshot(), source_before)
+        self.assertEqual(self.fixture.origin_refs(), origin_before)
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/tags/{release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+        internal_ref = f"refs/steadflow-upstream/releases/{release}"
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse", internal_ref, root=self.fixture.fork
+            ).stdout.strip(),
+            tag_object,
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse", f"{internal_ref}^{{commit}}", root=self.fixture.fork
+            ).stdout.strip(),
+            target_commit,
+        )
+
+        state = self.fixture.read_state()
+        worktree = self.fixture.worktree_path(release).resolve()
+        self.assertEqual(
+            state,
+            {
+                "branch": f"upgrade/{release}",
+                "internal_ref": internal_ref,
+                "peeled_commit": target_commit,
+                "phase": "merged",
+                "release": release,
+                "schema_version": 1,
+                "source_branch": "main",
+                "source_commit": self.fixture.source_commit,
+                "tag_object": tag_object,
+                "worktree": str(worktree),
+            },
+        )
+        self.assertEqual(stat.S_IMODE(self.fixture.state_path.stat().st_mode), 0o600)
+        self.assertEqual(
+            self.fixture.run_git(
+                "symbolic-ref", "--short", "HEAD", root=worktree
+            ).stdout.strip(),
+            f"upgrade/{release}",
+        )
+        candidate = self.fixture.run_git(
+            "rev-parse", "HEAD", root=worktree
+        ).stdout.strip()
+        parents = self.fixture.run_git(
+            "show", "-s", "--format=%P", candidate, root=worktree
+        ).stdout.split()
+        self.assertEqual(parents, [self.fixture.source_commit, target_commit])
+        self.assertEqual(
+            self.fixture.run_git(
+                "worktree", "list", "--porcelain", root=self.fixture.fork
+            ).stdout.count("worktree "),
+            2,
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "check-ignore", str(worktree), root=self.fixture.fork
+            ).returncode,
+            0,
+        )
+        traced = repository.commands
+        self.assertTrue(
+            any(
+                "fetch" in argv
+                and "upstream" in argv
+                and f"refs/tags/{release}:{internal_ref}" in argv
+                for argv in traced
+            ),
+            traced,
+        )
+        self.assertTrue(
+            any(
+                "merge" in argv
+                and "--no-ff" in argv
+                and "--no-edit" in argv
+                and target_commit in argv
+                for argv in traced
+            ),
+            traced,
+        )
+        forbidden_git_words = {
+            "push",
+            "tag",
+            "reset",
+            "--hard",
+            "--ours",
+            "--theirs",
+        }
+        forbidden_programs = {"docker", "kubectl", "ssh", "rsync", "gh"}
+        for argv in traced:
+            self.assertTrue(forbidden_git_words.isdisjoint(argv), argv)
+            self.assertTrue(forbidden_programs.isdisjoint(argv), argv)
+
+    def test_lightweight_release_is_peeled_without_creating_local_tag(self):
+        release = "v1.2.0"
+        target_commit, tag_object = self.fixture.add_release(
+            release, annotated=False
+        )
+        self.assertEqual(tag_object, target_commit)
+
+        completed = self.fixture.run_upgrade(release)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        state = self.fixture.read_state()
+        self.assertEqual(state["peeled_commit"], target_commit)
+        self.assertEqual(state["tag_object"], target_commit)
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/tags/{release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_worktree_and_merge_hooks_are_not_executed(self):
+        release = "v1.3.0"
+        self.fixture.add_release(release)
+        hooks = self.fixture.fork / ".git" / "hooks"
+        checkout_marker = self.fixture.root / "post-checkout-ran"
+        merge_marker = self.fixture.root / "post-merge-ran"
+        for hook_name, marker in (
+            ("post-checkout", checkout_marker),
+            ("post-merge", merge_marker),
+        ):
+            hook = hooks / hook_name
+            hook.write_text(
+                "#!/bin/sh\n"
+                f"printf 'hook ran\\n' > {shlex.quote(str(marker))}\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+
+        completed = self.fixture.run_upgrade(release)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertFalse(checkout_marker.exists())
+        self.assertFalse(merge_marker.exists())
+
+
+class UpgradeConflictContinueTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.fixture.create_source_conflict()
+        self.release = "v1.1.0"
+        self.target_commit, _ = self.fixture.add_release(
+            self.release, conflict=True
+        )
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def start_conflict(self):
+        source_before = self.fixture.source_snapshot()
+        origin_before = self.fixture.origin_refs()
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--continue", completed.stderr)
+        self.assertEqual(self.fixture.source_snapshot(), source_before)
+        self.assertEqual(self.fixture.origin_refs(), origin_before)
+        state = self.fixture.read_state()
+        self.assertEqual(state["phase"], "conflicted")
+        worktree = Path(state["worktree"])
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse", "MERGE_HEAD", root=worktree
+            ).stdout.strip(),
+            self.target_commit,
+        )
+        self.assertEqual(
+            self.fixture.run_git("rev-parse", "HEAD", root=worktree).stdout.strip(),
+            state["source_commit"],
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "diff", "--name-only", "--diff-filter=U", root=worktree
+            ).stdout.strip(),
+            "shared.txt",
+        )
+        self.assertIn("<<<<<<<", (worktree / "shared.txt").read_text())
+        return worktree
+
+    def test_conflict_is_preserved_without_abort_reset_or_resolution(self):
+        self.start_conflict()
+
+    def test_continue_blocks_while_unmerged_and_preserves_conflict(self):
+        worktree = self.start_conflict()
+        merge_head_before = self.fixture.run_git(
+            "rev-parse", "MERGE_HEAD", root=worktree
+        ).stdout
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unmerged", completed.stderr)
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse", "MERGE_HEAD", root=worktree
+            ).stdout,
+            merge_head_before,
+        )
+        self.assertEqual(self.fixture.read_state()["phase"], "conflicted")
+
+    def test_continue_completes_staged_resolution_noninteractively(self):
+        worktree = self.start_conflict()
+        (worktree / "shared.txt").write_text(
+            "resolved by fixture\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("PASS", completed.stdout)
+        self.assertEqual(self.fixture.read_state()["phase"], "merged")
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "rev-parse", "--verify", "MERGE_HEAD", root=worktree, check=False
+            ).returncode,
+            0,
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "merge-base", "--is-ancestor", self.target_commit, "HEAD",
+                root=worktree,
+                check=False,
+            ).returncode,
+            0,
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "merge-base", "--is-ancestor", self.fixture.source_commit, "HEAD",
+                root=worktree,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_continue_blocks_completed_merge_with_forgotten_untracked_file(self):
+        worktree = self.start_conflict()
+        (worktree / "shared.txt").write_text(
+            "resolved by fixture\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+        forgotten = worktree / "forgotten-untracked.txt"
+        forgotten.write_text("preserve me\n", encoding="utf-8")
+        state_before = self.fixture.read_state()
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("candidate working tree must be clean", completed.stderr)
+        self.assertEqual(self.fixture.read_state(), state_before)
+        self.assertEqual(forgotten.read_text(encoding="utf-8"), "preserve me\n")
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "rev-parse", "--verify", "MERGE_HEAD", root=worktree, check=False
+            ).returncode,
+            0,
+        )
+
+    def test_continue_accepts_user_completed_merge(self):
+        worktree = self.start_conflict()
+        (worktree / "shared.txt").write_text(
+            "manually completed\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+        self.fixture.run_git(
+            "commit", "-m", "manual merge completion", root=worktree
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.fixture.read_state()["phase"], "merged")
+        for ancestor in (self.fixture.source_commit, self.target_commit):
+            self.assertEqual(
+                self.fixture.run_git(
+                    "merge-base", "--is-ancestor", ancestor, "HEAD",
+                    root=worktree,
+                    check=False,
+                ).returncode,
+                0,
+            )
+
+    def test_continue_blocks_if_remote_tag_changed_during_conflict(self):
+        worktree = self.start_conflict()
+        original_state = self.fixture.read_state()
+        self.fixture.move_release_tag(self.release)
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("tag changed", completed.stderr)
+        self.assertEqual(self.fixture.read_state(), original_state)
+        self.assertEqual(
+            self.fixture.run_git(
+                "diff", "--name-only", "--diff-filter=U", root=worktree
+            ).stdout.strip(),
+            "shared.txt",
+        )
+
+    def test_continue_does_not_execute_post_merge_hook(self):
+        worktree = self.start_conflict()
+        marker = self.fixture.root / "continue-post-merge-ran"
+        hook = self.fixture.fork / ".git" / "hooks" / "post-merge"
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"printf 'hook ran\\n' > {shlex.quote(str(marker))}\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        (worktree / "shared.txt").write_text("resolved\n", encoding="utf-8")
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+
+        repository = GitRepository(self.fixture.fork)
+        state = resume_upgrade(repository)
+
+        self.assertEqual(state["phase"], "merged")
+        self.assertFalse(marker.exists())
+        continue_commands = [
+            argv
+            for argv in repository.commands
+            if "merge" in argv and "--continue" in argv
+        ]
+        self.assertEqual(len(continue_commands), 1, repository.commands)
+        self.assertIn("core.hooksPath=/dev/null", continue_commands[0])
+
+
+class UpgradeStateIdempotencyTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.release = "v1.1.0"
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_merged_release_rerun_reports_existing_candidate_without_duplicates(self):
+        self.fixture.add_release(self.release)
+        first = self.fixture.run_upgrade(self.release)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        worktrees_before = self.fixture.run_git(
+            "worktree", "list", "--porcelain", root=self.fixture.fork
+        ).stdout
+        branch_before = self.fixture.run_git(
+            "rev-parse", f"refs/heads/upgrade/{self.release}", root=self.fixture.fork
+        ).stdout
+
+        repeated = self.fixture.run_upgrade(self.release)
+
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertIn("existing", repeated.stdout)
+        self.assertEqual(
+            self.fixture.run_git(
+                "worktree", "list", "--porcelain", root=self.fixture.fork
+            ).stdout,
+            worktrees_before,
+        )
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse", f"refs/heads/upgrade/{self.release}",
+                root=self.fixture.fork,
+            ).stdout,
+            branch_before,
+        )
+
+    def test_merged_rerun_blocks_candidate_that_lost_source_ancestry(self):
+        target_commit, _ = self.fixture.add_release(self.release)
+        first = self.fixture.run_upgrade(self.release)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        worktree = self.fixture.worktree_path(self.release)
+        self.fixture.run_git("reset", "--hard", target_commit, root=worktree)
+
+        repeated = self.fixture.run_upgrade(self.release)
+
+        self.assertEqual(repeated.returncode, 2)
+        self.assertIn("source ancestry", repeated.stderr)
+
+    def test_merged_rerun_blocks_all_candidate_worktree_dirt(self):
+        mutations = ("untracked", "staged", "unstaged")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                fixture = HermeticUpgradeFixture()
+                try:
+                    fixture.add_release(self.release)
+                    first = fixture.run_upgrade(self.release)
+                    self.assertEqual(first.returncode, 0, first.stderr)
+                    state_before = fixture.read_state()
+                    worktree = fixture.worktree_path(self.release)
+                    if mutation == "untracked":
+                        (worktree / "candidate-untracked.txt").write_text(
+                            "untracked\n", encoding="utf-8"
+                        )
+                    else:
+                        dirty_path = worktree / f"upstream-{self.release}.txt"
+                        dirty_path.write_text(
+                            f"{mutation}\n", encoding="utf-8"
+                        )
+                        if mutation == "staged":
+                            fixture.run_git(
+                                "add", dirty_path.name, root=worktree
+                            )
+
+                    repeated = fixture.run_upgrade(self.release)
+
+                    self.assertEqual(repeated.returncode, 2, repeated.stderr)
+                    self.assertIn(
+                        "candidate working tree must be clean", repeated.stderr
+                    )
+                    self.assertEqual(fixture.read_state(), state_before)
+                    self.assertNotEqual(
+                        fixture.run_git(
+                            "status", "--porcelain=v2", "-z", root=worktree
+                        ).stdout,
+                        "",
+                    )
+                finally:
+                    fixture.cleanup()
+
+    def test_registered_worktree_cannot_be_replaced_by_independent_clone(self):
+        self.fixture.add_release(self.release)
+        first = self.fixture.run_upgrade(self.release)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        worktree = self.fixture.worktree_path(self.release)
+        self.fixture.run_git(
+            "worktree", "remove", "--force", str(worktree), root=self.fixture.fork
+        )
+        self.fixture.run_git(
+            "clone", "--quiet", "--no-local", str(self.fixture.fork), str(worktree),
+            root=None,
+        )
+        self.fixture.configure_identity(worktree)
+        self.fixture.run_git(
+            "checkout",
+            "-b",
+            f"upgrade/{self.release}",
+            f"origin/upgrade/{self.release}",
+            root=worktree,
+        )
+
+        repeated = self.fixture.run_upgrade(self.release)
+
+        self.assertEqual(repeated.returncode, 2)
+        self.assertRegex(repeated.stderr, r"common directory|not registered")
+
+    def test_conflicted_release_rerun_points_to_continue_without_duplicates(self):
+        self.fixture.create_source_conflict()
+        self.fixture.add_release(self.release, conflict=True)
+        first = self.fixture.run_upgrade(self.release)
+        self.assertNotEqual(first.returncode, 0)
+        worktrees_before = self.fixture.run_git(
+            "worktree", "list", "--porcelain", root=self.fixture.fork
+        ).stdout
+
+        repeated = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(repeated.returncode, 0)
+        self.assertIn("--continue", repeated.stderr)
+        self.assertEqual(
+            self.fixture.run_git(
+                "worktree", "list", "--porcelain", root=self.fixture.fork
+            ).stdout,
+            worktrees_before,
+        )
+
+    def test_different_release_is_blocked_before_fetch_when_state_is_active(self):
+        self.fixture.add_release(self.release)
+        self.assertEqual(self.fixture.run_upgrade(self.release).returncode, 0)
+        second_release = "v1.2.0"
+        self.fixture.add_release(second_release)
+
+        completed = self.fixture.run_upgrade(second_release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(self.release, completed.stderr)
+        self.assertIn(second_release, completed.stderr)
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/steadflow-upstream/releases/{second_release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_corrupt_state_fails_closed_before_fetch(self):
+        self.fixture.add_release(self.release)
+        self.fixture.state_path.parent.mkdir(parents=True)
+        self.fixture.state_path.write_text("{not json\n", encoding="utf-8")
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("upgrade state", completed.stderr)
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/steadflow-upstream/releases/{self.release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_state_schema_mismatch_fails_closed_before_fetch(self):
+        self.fixture.add_release(self.release)
+        self.fixture.state_path.parent.mkdir(parents=True)
+        self.fixture.state_path.write_text(
+            '{"schema_version": 1}\n', encoding="utf-8"
+        )
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("keys missing=", completed.stderr)
+
+    def test_branch_without_state_is_never_overwritten(self):
+        self.fixture.add_release(self.release)
+        self.fixture.run_git(
+            "branch", f"upgrade/{self.release}", root=self.fixture.fork
+        )
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("branch exists", completed.stderr)
+        self.assertFalse(self.fixture.state_path.exists())
+
+
+class UpgradeCompletedLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.first_release = "v1.1.0"
+        self.fixture.add_release(self.first_release)
+        created = self.fixture.run_upgrade(self.first_release)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.first_state = self.fixture.read_state()
+        self.first_worktree = Path(self.first_state["worktree"])
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def merge_candidate_to_source(self):
+        self.fixture.run_git(
+            "merge",
+            "--no-ff",
+            "--no-edit",
+            self.first_state["branch"],
+            root=self.fixture.fork,
+        )
+
+    def assert_active_state_preserved(self):
+        self.assertEqual(self.fixture.read_state(), self.first_state)
+        self.assertFalse(
+            self.fixture.completed_state_path(self.first_release).exists()
+        )
+
+    def test_completed_candidate_is_archived_and_next_release_can_start(self):
+        self.merge_candidate_to_source()
+        source_after_merge = self.fixture.run_git(
+            "rev-parse", "HEAD", root=self.fixture.fork
+        ).stdout.strip()
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("completed", completed.stdout)
+        self.assertFalse(self.fixture.state_path.exists())
+        completed_path = self.fixture.completed_state_path(self.first_release)
+        self.assertTrue(completed_path.is_file())
+        self.assertEqual(stat.S_IMODE(completed_path.stat().st_mode), 0o600)
+        self.assertEqual(
+            json.loads(completed_path.read_text(encoding="utf-8")),
+            self.first_state,
+        )
+        self.assertTrue(self.first_worktree.is_dir())
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse", f"refs/heads/{self.first_state['branch']}",
+                root=self.fixture.fork,
+            ).stdout.strip(),
+            self.fixture.run_git(
+                "rev-parse", "HEAD", root=self.first_worktree
+            ).stdout.strip(),
+        )
+        self.assertEqual(
+            self.fixture.run_git("rev-parse", "HEAD", root=self.fixture.fork).stdout.strip(),
+            source_after_merge,
+        )
+
+        second_release = "v1.2.0"
+        self.fixture.add_release(second_release)
+        second = self.fixture.run_upgrade(second_release)
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.fixture.read_state()["release"], second_release)
+        self.assertTrue(self.fixture.worktree_path(second_release).is_dir())
+        self.assertTrue(completed_path.is_file())
+        self.assertEqual(
+            self.fixture.run_git(
+                "worktree", "list", "--porcelain", root=self.fixture.fork
+            ).stdout.count("worktree "),
+            3,
+        )
+
+    def test_dirty_source_cannot_archive_completed_candidate(self):
+        self.merge_candidate_to_source()
+        (self.fixture.fork / "dirty-after-merge.txt").write_text(
+            "dirty\n", encoding="utf-8"
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("must be clean", completed.stderr)
+        self.assert_active_state_preserved()
+
+    def test_source_without_candidate_ancestry_cannot_archive(self):
+        (self.fixture.fork / "source-only.txt").write_text(
+            "source only\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "source-only.txt", root=self.fixture.fork)
+        self.fixture.run_git(
+            "commit", "-m", "advance source without candidate", root=self.fixture.fork
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertRegex(completed.stderr, r"source HEAD changed|not.*ancestor")
+        self.assert_active_state_preserved()
+
+    def test_tampered_candidate_cannot_archive_completed_state(self):
+        self.merge_candidate_to_source()
+        self.fixture.run_git(
+            "reset", "--hard", self.first_state["peeled_commit"],
+            root=self.first_worktree,
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("source ancestry", completed.stderr)
+        self.assert_active_state_preserved()
+
+    def test_existing_completed_audit_is_never_overwritten(self):
+        self.merge_candidate_to_source()
+        completed_path = self.fixture.completed_state_path(self.first_release)
+        sentinel = b"preexisting audit\n"
+        completed_path.write_bytes(sentinel)
+        completed_path.chmod(0o600)
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("completed state archive already exists", completed.stderr)
+        self.assertEqual(completed_path.read_bytes(), sentinel)
+        self.assertEqual(self.fixture.read_state(), self.first_state)
+
+    def test_dirty_candidate_cannot_be_archived(self):
+        self.merge_candidate_to_source()
+        dirty = self.first_worktree / "candidate-untracked.txt"
+        dirty.write_text("preserve\n", encoding="utf-8")
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("candidate working tree must be clean", completed.stderr)
+        self.assert_active_state_preserved()
+        self.assertEqual(dirty.read_text(encoding="utf-8"), "preserve\n")
+
+
+class UpgradePreflightFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.release = "v1.1.0"
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def assert_no_candidate_side_effects(self):
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertFalse(self.fixture.worktree_path(self.release).exists())
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/heads/upgrade/{self.release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_dirty_source_blocks_before_fetch_state_or_worktree(self):
+        self.fixture.add_release(self.release)
+        dirty = self.fixture.fork / "dirty.txt"
+        dirty.write_text("dirty\n", encoding="utf-8")
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("must be clean", completed.stderr)
+        self.assert_no_candidate_side_effects()
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref",
+                "--verify",
+                f"refs/steadflow-upstream/releases/{self.release}",
+                root=self.fixture.fork,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_malformed_nested_manifest_is_controlled_block_not_traceback(self):
+        manifest_path = self.fixture.fork / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["data"] = []
+        self.fixture.write_json(".steadflow/customization.yml", manifest)
+        self.fixture.run_git("add", str(manifest_path), root=self.fixture.fork)
+        self.fixture.run_git(
+            "commit", "-m", "malformed fixture manifest", root=self.fixture.fork
+        )
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("BLOCKED:", completed.stderr)
+        self.assertIn("data must be an object", completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
+
+    def test_missing_upstream_remote_blocks(self):
+        self.fixture.run_git("remote", "remove", "upstream", root=self.fixture.fork)
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("upstream remote lookup failed", completed.stderr)
+        self.assert_no_candidate_side_effects()
+
+    def test_upstream_url_mismatch_with_lock_blocks_before_fetch(self):
+        self.fixture.add_release(self.release)
+        self.fixture.run_git(
+            "remote", "set-url", "upstream", str(self.fixture.origin_bare),
+            root=self.fixture.fork,
+        )
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("does not match", completed.stderr)
+        self.assert_no_candidate_side_effects()
+
+    def test_symlinked_worktrees_root_cannot_escape_repository(self):
+        self.fixture.add_release(self.release)
+        outside = self.fixture.root / "outside-worktrees"
+        outside.mkdir()
+        (self.fixture.fork / ".worktrees").symlink_to(
+            outside, target_is_directory=True
+        )
+        self.fixture.run_git(
+            "add", "-f", ".worktrees", root=self.fixture.fork
+        )
+        self.fixture.run_git(
+            "commit", "-m", "tracked malicious worktree symlink",
+            root=self.fixture.fork,
+        )
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("escapes repository", completed.stderr)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse(self.fixture.state_path.exists())
+
+    def test_missing_release_tag_blocks_without_state_or_worktree(self):
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            f"upstream release tag {self.release} is missing", completed.stderr
+        )
+        self.assert_no_candidate_side_effects()
+
+    def test_fetch_failure_blocks_without_state_or_worktree(self):
+        self.fixture.add_release(self.release)
+        invocation_count = self.fixture.root / "upload-pack-count"
+        upload_pack = self.fixture.root / "fixture-upload-pack"
+        upload_pack.write_text(
+            "#!/bin/sh\n"
+            f'count_file="{invocation_count}"\n'
+            'count=$(cat "$count_file" 2>/dev/null || printf 0)\n'
+            'count=$((count + 1))\n'
+            'printf "%s\\n" "$count" > "$count_file"\n'
+            'if [ "$count" -gt 1 ]; then exit 1; fi\n'
+            'exec git-upload-pack "$@"\n',
+            encoding="utf-8",
+        )
+        upload_pack.chmod(0o755)
+        self.fixture.run_git(
+            "config", "--local", "remote.upstream.uploadpack", str(upload_pack),
+            root=self.fixture.fork,
+        )
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("fetch of exact upstream release", completed.stderr)
+        self.assert_no_candidate_side_effects()
+
+    def test_release_ref_that_does_not_peel_to_commit_blocks(self):
+        blob = self.fixture.add_noncommit_release(self.release)
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("peel", completed.stderr)
+        self.assert_no_candidate_side_effects()
+        self.assertEqual(
+            self.fixture.run_git(
+                "rev-parse",
+                f"refs/steadflow-upstream/releases/{self.release}",
+                root=self.fixture.fork,
+            ).stdout.strip(),
+            blob,
+        )
+
+    def test_locked_commit_that_is_not_source_ancestor_blocks(self):
+        target_commit, _ = self.fixture.add_release(self.release)
+        self.fixture.run_git(
+            "fetch",
+            "--no-tags",
+            "upstream",
+            f"refs/tags/{self.release}:refs/fixture/locked-release",
+            root=self.fixture.fork,
+        )
+        target_tree = self.fixture.run_git(
+            "rev-parse", f"{target_commit}^{{tree}}", root=self.fixture.fork
+        ).stdout.strip()
+        self.fixture.update_lock(
+            release=self.release,
+            peeled_commit=target_commit,
+            tree=target_tree,
+        )
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("not an ancestor", completed.stderr)
+        self.assert_no_candidate_side_effects()
+
+    def test_configuration_documents_reject_symlinks_nonregular_files_and_escape(self):
+        relative_paths = (
+            ".steadflow/customization.yml",
+            ".steadflow/upstream-lock.json",
+            ".steadflow/migration-checksums.json",
+        )
+        attacks = ("symlink", "directory", "escape")
+        for relative_path in relative_paths:
+            for attack in attacks:
+                with self.subTest(path=relative_path, attack=attack):
+                    fixture = HermeticUpgradeFixture()
+                    try:
+                        target = fixture.fork / relative_path
+                        fixture.run_git(
+                            "update-index", "--assume-unchanged", relative_path,
+                            root=fixture.fork,
+                        )
+                        original_bytes = target.read_bytes()
+                        target.unlink()
+                        if attack == "symlink":
+                            safe_target = fixture.fork / ".git" / (
+                                target.name + ".fixture"
+                            )
+                            safe_target.write_bytes(original_bytes)
+                            target.symlink_to(safe_target)
+                        elif attack == "directory":
+                            target.mkdir()
+                        else:
+                            outside = fixture.root / (target.name + ".outside")
+                            outside.write_bytes(original_bytes)
+                            target.symlink_to(outside)
+
+                        completed = fixture.run_upgrade("--verify-current")
+
+                        self.assertEqual(completed.returncode, 2)
+                        self.assertRegex(
+                            completed.stderr,
+                            r"regular file|symlink|escapes repository",
+                        )
+                        self.assertFalse(fixture.state_path.parent.exists())
+                    finally:
+                        fixture.cleanup()
+
+
+class UpgradeStateFilesystemBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.release = "v1.1.0"
+        self.fixture.add_release(self.release)
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_state_directory_symlink_is_rejected_without_external_write(self):
+        outside = self.fixture.root / "outside-state"
+        outside.mkdir()
+        self.fixture.state_path.parent.symlink_to(outside, target_is_directory=True)
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("state directory", completed.stderr)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_state_file_symlink_is_rejected_without_external_write(self):
+        self.fixture.state_path.parent.mkdir(mode=0o700)
+        outside = self.fixture.root / "outside-state.json"
+        outside.write_text("preserve\n", encoding="utf-8")
+        self.fixture.state_path.symlink_to(outside)
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("state file", completed.stderr)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "preserve\n")
+
+    def test_existing_state_directory_is_tightened_and_files_are_private(self):
+        self.fixture.state_path.parent.mkdir(mode=0o777)
+        self.fixture.state_path.parent.chmod(0o777)
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        state_dir = self.fixture.state_path.parent
+        self.assertEqual(stat.S_IMODE(state_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(self.fixture.state_path.stat().st_mode), 0o600)
+        lock_path = state_dir / "upgrade.lock"
+        self.assertTrue(lock_path.is_file())
+        self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
+
+    def test_new_state_directory_and_git_common_parent_are_fsynced(self):
+        repository = GitRepository(self.fixture.fork)
+        fsynced_inodes = []
+        real_fsync = os.fsync
+
+        def trace_fsync(descriptor):
+            descriptor_stat = os.fstat(descriptor)
+            fsynced_inodes.append(
+                (descriptor_stat.st_dev, descriptor_stat.st_ino)
+            )
+            return real_fsync(descriptor)
+
+        with mock.patch("upstream_sync.os.fsync", side_effect=trace_fsync):
+            state = create_upgrade_candidate(repository, self.release)
+
+        self.assertEqual(state["phase"], "merged")
+        state_directory = self.fixture.state_path.parent
+        common_directory = state_directory.parent
+        common_inode = (common_directory.stat().st_dev, common_directory.stat().st_ino)
+        state_inode = (state_directory.stat().st_dev, state_directory.stat().st_ino)
+        self.assertIn(common_inode, fsynced_inodes)
+        self.assertIn(state_inode, fsynced_inodes)
+        self.assertLess(
+            fsynced_inodes.index(common_inode),
+            fsynced_inodes.index(state_inode),
+            fsynced_inodes,
+        )
+
+
+class UpgradeTagImmutabilityTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.release = "v1.1.0"
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_matching_internal_release_ref_is_reused_without_fetch(self):
+        target_commit, tag_object = self.fixture.add_release(self.release)
+        internal_ref = f"refs/steadflow-upstream/releases/{self.release}"
+        self.fixture.run_git(
+            "fetch",
+            "--no-tags",
+            "upstream",
+            f"refs/tags/{self.release}:{internal_ref}",
+            root=self.fixture.fork,
+        )
+        repository = GitRepository(self.fixture.fork)
+
+        state = create_upgrade_candidate(repository, self.release)
+
+        self.assertEqual(state["tag_object"], tag_object)
+        self.assertEqual(state["peeled_commit"], target_commit)
+        self.assertFalse(any("fetch" in argv for argv in repository.commands))
+
+    def test_moved_remote_tag_blocks_reuse_of_internal_ref(self):
+        self.fixture.add_release(self.release)
+        internal_ref = f"refs/steadflow-upstream/releases/{self.release}"
+        self.fixture.run_git(
+            "fetch",
+            "--no-tags",
+            "upstream",
+            f"refs/tags/{self.release}:{internal_ref}",
+            root=self.fixture.fork,
+        )
+        self.fixture.move_release_tag(self.release)
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("tag changed", completed.stderr)
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertFalse(self.fixture.worktree_path(self.release).exists())
+
+    def test_moved_remote_tag_blocks_existing_merged_candidate(self):
+        self.fixture.add_release(self.release)
+        self.assertEqual(self.fixture.run_upgrade(self.release).returncode, 0)
+        original_state = self.fixture.read_state()
+        self.fixture.move_release_tag(self.release)
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("tag changed", completed.stderr)
+        self.assertEqual(self.fixture.read_state(), original_state)
+
+    def test_path_without_state_is_never_overwritten(self):
+        self.fixture.add_release(self.release)
+        worktree = self.fixture.worktree_path(self.release)
+        worktree.mkdir(parents=True)
+        sentinel = worktree / "sentinel"
+        sentinel.write_text("preserve\n", encoding="utf-8")
+
+        completed = self.fixture.run_upgrade(self.release)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("path exists", completed.stderr)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve\n")
+        self.assertFalse(self.fixture.state_path.exists())
+
+
+class UpgradeStateValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.fixture.create_source_conflict()
+        self.release = "v1.1.0"
+        self.target_commit, _ = self.fixture.add_release(
+            self.release, conflict=True
+        )
+        started = self.fixture.run_upgrade(self.release)
+        self.assertNotEqual(started.returncode, 0)
+        self.state = self.fixture.read_state()
+        self.worktree = Path(self.state["worktree"])
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def write_state(self, state):
+        self.fixture.state_path.write_text(
+            json.dumps(state, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_continue_blocks_if_source_head_changed(self):
+        (self.fixture.fork / "after-state.txt").write_text(
+            "changed\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "after-state.txt", root=self.fixture.fork)
+        self.fixture.run_git(
+            "commit", "-m", "source advanced after state", root=self.fixture.fork
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("source HEAD changed", completed.stderr)
+        self.assertEqual(self.fixture.read_state(), self.state)
+
+    def test_continue_blocks_state_worktree_outside_deterministic_path(self):
+        altered = dict(self.state)
+        altered["worktree"] = str((self.fixture.root / "outside").resolve())
+        self.write_state(altered)
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("worktree path is inconsistent", completed.stderr)
+
+    def test_continue_blocks_state_peeled_commit_mismatch(self):
+        altered = dict(self.state)
+        altered["peeled_commit"] = self.state["source_commit"]
+        self.write_state(altered)
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("peeled commit changed", completed.stderr)
+
+    def test_continue_blocks_candidate_branch_mismatch(self):
+        self.fixture.run_git(
+            "branch", "-m", "upgrade/v9.9.9", root=self.worktree
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("worktree branch is inconsistent", completed.stderr)
+
+    def test_continue_blocks_merge_head_mismatch_without_resolving(self):
+        (self.worktree / "shared.txt").write_text(
+            "staged resolution\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "shared.txt", root=self.worktree)
+        merge_head_path = Path(
+            self.fixture.run_git(
+                "rev-parse", "--git-path", "MERGE_HEAD", root=self.worktree
+            ).stdout.strip()
+        )
+        merge_head_path.write_text(
+            self.state["source_commit"] + "\n", encoding="ascii"
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("MERGE_HEAD does not match", completed.stderr)
+        self.assertEqual(
+            merge_head_path.read_text(encoding="ascii").strip(),
+            self.state["source_commit"],
+        )
+
+
+class UpgradePreparedResumeTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_continue_resumes_state_written_before_merge_started(self):
+        release = "v1.1.0"
+        target_commit, tag_object = self.fixture.add_release(release)
+        internal_ref = f"refs/steadflow-upstream/releases/{release}"
+        self.fixture.run_git(
+            "fetch",
+            "--no-tags",
+            "upstream",
+            f"refs/tags/{release}:{internal_ref}",
+            root=self.fixture.fork,
+        )
+        worktree = self.fixture.worktree_path(release).resolve()
+        worktree.parent.mkdir()
+        self.fixture.run_git(
+            "worktree",
+            "add",
+            "-b",
+            f"upgrade/{release}",
+            str(worktree),
+            self.fixture.source_commit,
+            root=self.fixture.fork,
+        )
+        state = {
+            "branch": f"upgrade/{release}",
+            "internal_ref": internal_ref,
+            "peeled_commit": target_commit,
+            "phase": "merging",
+            "release": release,
+            "schema_version": 1,
+            "source_branch": "main",
+            "source_commit": self.fixture.source_commit,
+            "tag_object": tag_object,
+            "worktree": str(worktree),
+        }
+        self.fixture.state_path.parent.mkdir()
+        self.fixture.state_path.write_text(
+            json.dumps(state, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.fixture.read_state()["phase"], "merged")
+        parents = self.fixture.run_git(
+            "show", "-s", "--format=%P", "HEAD", root=worktree
+        ).stdout.split()
+        self.assertEqual(parents, [self.fixture.source_commit, target_commit])
+
+
+class UpgradeGitEnvironmentTests(unittest.TestCase):
+    def test_git_runner_does_not_inherit_trace_write_environment(self):
+        trace_variable = "GIT_TRACE2_EVENT"
+        previous = os.environ.get(trace_variable)
+        os.environ[trace_variable] = "/tmp/steadflow-must-not-write-trace"
+        try:
+            repository = GitRepository(REPO_ROOT)
+        finally:
+            if previous is None:
+                del os.environ[trace_variable]
+            else:
+                os.environ[trace_variable] = previous
+
+        self.assertNotIn(trace_variable, repository.environment)
+
+
+class UpgradeConcurrencyTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_concurrent_releases_create_exactly_one_candidate(self):
+        first_release = "v1.1.0"
+        second_release = "v1.2.0"
+        self.fixture.add_release(first_release)
+        self.fixture.add_release(second_release)
+        entered = self.fixture.root / "upload-pack-entered"
+        release_barrier = self.fixture.root / "upload-pack-release"
+        count = self.fixture.root / "upload-pack-count"
+        upload_pack = self.fixture.root / "blocking-upload-pack"
+        upload_pack.write_text(
+            "#!/bin/sh\n"
+            f'count_file="{count}"\n'
+            f'entered_file="{entered}"\n'
+            f'release_file="{release_barrier}"\n'
+            'current=$(cat "$count_file" 2>/dev/null || printf 0)\n'
+            'current=$((current + 1))\n'
+            'printf "%s\\n" "$current" > "$count_file"\n'
+            'if [ "$current" -eq 1 ]; then\n'
+            '  : > "$entered_file"\n'
+            '  while [ ! -e "$release_file" ]; do sleep 0.05; done\n'
+            'fi\n'
+            'exec git-upload-pack "$@"\n',
+            encoding="utf-8",
+        )
+        upload_pack.chmod(0o755)
+        self.fixture.run_git(
+            "config", "--local", "remote.upstream.uploadpack", str(upload_pack),
+            root=self.fixture.fork,
+        )
+        environment = dict(self.fixture.environment)
+
+        first = subprocess.Popen(
+            [str(MODULE_DIR / "upgrade"), first_release],
+            cwd=self.fixture.fork,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline = time.monotonic() + 10
+        while not entered.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(entered.exists(), "first release did not reach upload-pack")
+        second = subprocess.Popen(
+            [str(MODULE_DIR / "upgrade"), second_release],
+            cwd=self.fixture.fork,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(0.2)
+        release_barrier.touch()
+        first_stdout, first_stderr = first.communicate(timeout=20)
+        second_stdout, second_stderr = second.communicate(timeout=20)
+
+        self.assertEqual(first.returncode, 0, first_stderr)
+        self.assertEqual(second.returncode, 2, second_stdout + second_stderr)
+        self.assertIn("active release", second_stderr)
+        self.assertEqual(int(count.read_text(encoding="utf-8")), 2)
+        state = self.fixture.read_state()
+        self.assertEqual(state["release"], first_release)
+        worktrees = self.fixture.run_git(
+            "worktree", "list", "--porcelain", root=self.fixture.fork
+        ).stdout
+        self.assertEqual(worktrees.count("worktree "), 2)
+        self.assertTrue(self.fixture.worktree_path(first_release).is_dir())
+        self.assertFalse(self.fixture.worktree_path(second_release).exists())
+        self.assertNotEqual(
+            self.fixture.run_git(
+                "show-ref", "--verify", f"refs/heads/upgrade/{second_release}",
+                root=self.fixture.fork, check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_release_rechecks_clean_source_after_waiting_for_upgrade_lock(self):
+        release = "v1.1.0"
+        self.fixture.add_release(release)
+        preflight_complete = self.fixture.root / "release-preflight-complete"
+        environment = self.fixture.environment_with_preflight_barrier(
+            preflight_complete
+        )
+
+        with self.fixture.hold_upgrade_lock():
+            process = subprocess.Popen(
+                [str(MODULE_DIR / "upgrade"), release],
+                cwd=self.fixture.fork,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            deadline = time.monotonic() + 10
+            while not preflight_complete.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(preflight_complete.exists(), "preflight did not complete")
+            self.assertIsNone(process.poll(), "upgrade did not wait for held lock")
+            (self.fixture.fork / "dirty-while-waiting.txt").write_text(
+                "dirty\n", encoding="utf-8"
+            )
+
+        stdout, stderr = process.communicate(timeout=20)
+
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn("must be clean", stderr)
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertFalse(self.fixture.worktree_path(release).exists())
+        for ref in (
+            f"refs/heads/upgrade/{release}",
+            f"refs/steadflow-upstream/releases/{release}",
+        ):
+            self.assertNotEqual(
+                self.fixture.run_git(
+                    "show-ref", "--verify", ref,
+                    root=self.fixture.fork, check=False,
+                ).returncode,
+                0,
+            )
+
+    def test_continue_rechecks_clean_source_after_waiting_for_upgrade_lock(self):
+        release = "v1.1.0"
+        self.fixture.create_source_conflict()
+        self.fixture.add_release(release, conflict=True)
+        started = self.fixture.run_upgrade(release)
+        self.assertEqual(started.returncode, 2, started.stderr)
+        state_before = self.fixture.read_state()
+        worktree = Path(state_before["worktree"])
+        (worktree / "shared.txt").write_text("resolved\n", encoding="utf-8")
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+        preflight_complete = self.fixture.root / "continue-preflight-complete"
+        environment = self.fixture.environment_with_preflight_barrier(
+            preflight_complete
+        )
+
+        with self.fixture.hold_upgrade_lock():
+            process = subprocess.Popen(
+                [str(MODULE_DIR / "upgrade"), "--continue"],
+                cwd=self.fixture.fork,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            deadline = time.monotonic() + 10
+            while not preflight_complete.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(preflight_complete.exists(), "preflight did not complete")
+            self.assertIsNone(process.poll(), "continue did not wait for held lock")
+            (self.fixture.fork / "dirty-while-continuing.txt").write_text(
+                "dirty\n", encoding="utf-8"
+            )
+
+        stdout, stderr = process.communicate(timeout=20)
+
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn("must be clean", stderr)
+        self.assertEqual(self.fixture.read_state(), state_before)
+        self.assertEqual(
+            self.fixture.run_git("rev-parse", "MERGE_HEAD", root=worktree).stdout.strip(),
+            state_before["peeled_commit"],
+        )
+
+
+class UpgradeDiagnosticRedactionTests(unittest.TestCase):
+    def test_lock_and_remote_urls_do_not_leak_credentials_query_or_fragment(self):
+        dangerous_urls = (
+            "https://example.invalid/owner/repo.git?token=TASK6_QUERY_SECRET",
+            "https://example.invalid/owner/repo.git#TASK6_FRAGMENT_SECRET",
+            "https://TASK6_USER:TASK6_PASSWORD@example.invalid/owner/repo.git",
+        )
+        for dangerous_url in dangerous_urls:
+            with self.subTest(url=dangerous_url.split(":", 1)[0]):
+                fixture = HermeticUpgradeFixture()
+                try:
+                    fixture.update_lock(repository=dangerous_url)
+                    fixture.run_git(
+                        "remote", "set-url", "upstream", dangerous_url,
+                        root=fixture.fork,
+                    )
+
+                    completed = fixture.run_upgrade("--verify-current")
+
+                    self.assertEqual(completed.returncode, 2)
+                    combined = completed.stdout + completed.stderr
+                    for secret in (
+                        "TASK6_QUERY_SECRET",
+                        "TASK6_FRAGMENT_SECRET",
+                        "TASK6_USER",
+                        "TASK6_PASSWORD",
+                    ):
+                        self.assertNotIn(secret, combined)
+                    self.assertIn("BLOCKED", completed.stderr)
+                finally:
+                    fixture.cleanup()
+
+    def test_git_failure_diagnostic_redacts_url_secrets(self):
+        fixture = HermeticUpgradeFixture()
+        try:
+            fake_bin = fixture.root / "fake-bin"
+            fake_bin.mkdir()
+            fake_git = fake_bin / "git"
+            fake_git.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' "
+                "'fatal: https://TASK6_USER:TASK6_PASSWORD@example.invalid/"
+                "repo.git?token=TASK6_QUERY_SECRET#TASK6_FRAGMENT_SECRET' >&2\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            fake_git.chmod(0o755)
+            repository = GitRepository(fixture.fork)
+            repository.environment["PATH"] = str(fake_bin)
+
+            with self.assertRaises(UpgradeBlocked) as raised:
+                repository.run("status", operation="adversarial Git failure")
+
+            combined = str(raised.exception)
+            for secret in (
+                "TASK6_QUERY_SECRET",
+                "TASK6_FRAGMENT_SECRET",
+                "TASK6_USER",
+                "TASK6_PASSWORD",
+            ):
+                self.assertNotIn(secret, combined)
+            self.assertIn("<redacted>", combined)
+        finally:
+            fixture.cleanup()
+
+
+class HermeticFixtureIsolationGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def test_fixture_git_helper_requires_explicit_root_before_execution(self):
+        previous_cwd = Path.cwd()
+        guarded = False
+        os.chdir(self.fixture.root)
+        try:
+            try:
+                self.fixture.run_git(
+                    "remote",
+                    "set-url",
+                    "origin",
+                    str(self.fixture.origin_bare),
+                    check=False,
+                )
+            except AssertionError:
+                guarded = True
+        finally:
+            os.chdir(previous_cwd)
+
+        self.assertTrue(guarded, "fixture Git calls must reject an omitted root")
+
+    def test_fixture_remote_set_url_only_changes_temporary_fork(self):
+        protected_before = protected_repo_snapshot()
+
+        self.fixture.run_git(
+            "remote",
+            "set-url",
+            "origin",
+            str(self.fixture.upstream_bare),
+            root=self.fixture.fork,
+        )
+
+        self.assertEqual(
+            self.fixture.run_git(
+                "remote", "get-url", "origin", root=self.fixture.fork
+            ).stdout.strip(),
+            str(self.fixture.upstream_bare),
+        )
+        self.assertEqual(protected_repo_snapshot(), protected_before)
+
+    def test_suite_cache_cleanup_preserves_preexisting_user_cache(self):
+        cache_dir = self.fixture.root / "__pycache__"
+        cache_dir.mkdir()
+        preexisting = cache_dir / "user-owned.pyc"
+        preexisting.write_bytes(b"user cache\n")
+        suite_created = cache_dir / "test_upstream_sync.fixture.pyc"
+        suite_created.write_bytes(b"suite cache\n")
+
+        _cleanup_suite_cache(suite_created, created_by_suite=True)
+        _cleanup_suite_cache(preexisting, created_by_suite=False)
+
+        self.assertFalse(suite_created.exists())
+        self.assertEqual(preexisting.read_bytes(), b"user cache\n")
+        self.assertTrue(cache_dir.is_dir())
+
+    def test_exact_unittest_command_leaves_disposable_clone_without_pycache(self):
+        if os.environ.get("STEADFLOW_NESTED_EXACT_SUITE") == "1":
+            self.skipTest("avoid recursive exact-suite self invocation")
+        clone = self.fixture.root / "exact-suite-clone"
+        self.fixture.run_git(
+            "clone", "--quiet", "--no-local", str(REPO_ROOT), str(clone), root=None
+        )
+        self.fixture.configure_identity(clone)
+        for relative in (
+            "tools/upstream-sync/test_upstream_sync.py",
+            "tools/upstream-sync/upstream_sync.py",
+            "tools/upstream-sync/upgrade",
+        ):
+            source = REPO_ROOT / relative
+            destination = clone / relative
+            shutil.copy2(source, destination)
+        self.fixture.run_git(
+            "add",
+            "tools/upstream-sync/test_upstream_sync.py",
+            "tools/upstream-sync/upstream_sync.py",
+            "tools/upstream-sync/upgrade",
+            root=clone,
+        )
+        self.fixture.run_git(
+            "commit", "--allow-empty", "-m", "exact suite candidate", root=clone
+        )
+        environment = dict(os.environ)
+        environment.update(self.fixture.environment)
+        environment["STEADFLOW_NESTED_EXACT_SUITE"] = "1"
+        launcher_directory = self.fixture.root / "python-launcher"
+        launcher_directory.mkdir()
+        launcher = launcher_directory / "python3"
+        launcher.write_text(
+            "#!/usr/bin/python3\n"
+            "import os\n"
+            "import runpy\n"
+            "import sys\n"
+            "if sys.argv[1:3] != ['-m', 'unittest']:\n"
+            "    os.execv('/usr/bin/python3', ['/usr/bin/python3'] + sys.argv[1:])\n"
+            "sys.pycache_prefix = None\n"
+            "sys.path.insert(0, os.getcwd())\n"
+            "sys.argv = ['unittest'] + sys.argv[3:]\n"
+            "runpy.run_module('unittest', run_name='__main__', alter_sys=True)\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(0o755)
+        environment["PATH"] = str(launcher_directory) + os.pathsep + environment["PATH"]
+
+        completed = subprocess.run(
+            [
+                "python3", "-m", "unittest",
+                "tools/upstream-sync/test_upstream_sync.py", "-v",
+            ],
+            cwd=clone,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertFalse((clone / "tools/upstream-sync/__pycache__").exists())
+        self.assertEqual(
+            self.fixture.run_git("status", "--porcelain", root=clone).stdout,
+            "",
+        )
+
+    def test_exact_unittest_command_preserves_preexisting_same_name_test_cache(self):
+        if os.environ.get("STEADFLOW_NESTED_EXACT_SUITE") == "1":
+            self.skipTest("avoid recursive exact-suite self invocation")
+        clone = self.fixture.root / "exact-suite-preexisting-cache-clone"
+        self.fixture.run_git(
+            "clone", "--quiet", "--no-local", str(REPO_ROOT), str(clone), root=None
+        )
+        self.fixture.configure_identity(clone)
+        for relative in (
+            "tools/upstream-sync/test_upstream_sync.py",
+            "tools/upstream-sync/upstream_sync.py",
+            "tools/upstream-sync/upgrade",
+        ):
+            shutil.copy2(REPO_ROOT / relative, clone / relative)
+        self.fixture.run_git(
+            "add",
+            "tools/upstream-sync/test_upstream_sync.py",
+            "tools/upstream-sync/upstream_sync.py",
+            "tools/upstream-sync/upgrade",
+            root=clone,
+        )
+        self.fixture.run_git(
+            "commit", "--allow-empty", "-m", "preexisting cache candidate",
+            root=clone,
+        )
+        test_source = clone / "tools/upstream-sync/test_upstream_sync.py"
+        cache_path = Path(importlib.util.cache_from_source(str(test_source)))
+        cache_path.parent.mkdir()
+        import py_compile
+
+        py_compile.compile(str(test_source), cfile=str(cache_path), doraise=True)
+        cache_path.chmod(0o640)
+        fixed_mtime_ns = time.time_ns() - 60_000_000_000
+        os.utime(cache_path, ns=(fixed_mtime_ns, fixed_mtime_ns))
+        before = (
+            cache_path.read_bytes(),
+            stat.S_IMODE(cache_path.stat().st_mode),
+            cache_path.stat().st_mtime_ns,
+        )
+        environment = dict(os.environ)
+        environment.update(self.fixture.environment)
+        environment["STEADFLOW_NESTED_EXACT_SUITE"] = "1"
+        launcher_directory = self.fixture.root / "preexisting-python-launcher"
+        launcher_directory.mkdir()
+        launcher = launcher_directory / "python3"
+        launcher.write_text(
+            "#!/usr/bin/python3\n"
+            "import os\n"
+            "import runpy\n"
+            "import sys\n"
+            "if sys.argv[1:3] != ['-m', 'unittest']:\n"
+            "    os.execv('/usr/bin/python3', ['/usr/bin/python3'] + sys.argv[1:])\n"
+            "sys.pycache_prefix = None\n"
+            "sys.path.insert(0, os.getcwd())\n"
+            "sys.argv = ['unittest'] + sys.argv[3:]\n"
+            "runpy.run_module('unittest', run_name='__main__', alter_sys=True)\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(0o755)
+        environment["PATH"] = str(launcher_directory) + os.pathsep + environment["PATH"]
+
+        completed = subprocess.run(
+            [
+                "python3", "-m", "unittest",
+                "tools/upstream-sync/test_upstream_sync.py", "-v",
+            ],
+            cwd=clone,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertTrue(cache_path.is_file())
+        after = (
+            cache_path.read_bytes(),
+            stat.S_IMODE(cache_path.stat().st_mode),
+            cache_path.stat().st_mtime_ns,
+        )
+        self.assertEqual(after, before)
+        self.assertEqual(
+            sorted(path.name for path in cache_path.parent.iterdir()),
+            [cache_path.name],
+        )
 
 
 if __name__ == "__main__":

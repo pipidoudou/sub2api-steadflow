@@ -29,15 +29,15 @@ WORKDIR /app/frontend
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # Install dependencies first (better caching)
-COPY console/frontend/package.json console/frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN --mount=type=cache,id=sub2api-pnpm-store,target=/root/.local/share/pnpm/store \
     if [ -n "${NPM_CONFIG_REGISTRY}" ]; then pnpm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
     pnpm install --frozen-lockfile --prefer-offline
 
 # Copy frontend source and the workspace-level compliance documents used by
 # LegalDocumentView.vue and AdminComplianceDialog.vue at build time.
-COPY console/frontend/ ./
-COPY docs/legal/ /docs/legal/
+COPY frontend/ ./
+COPY docs/legal/ /app/docs/legal/
 RUN pnpm run build
 
 # -----------------------------------------------------------------------------
@@ -68,14 +68,14 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app/backend
 
 # Copy go mod files first (better caching)
-COPY console/backend/go.mod console/backend/go.sum ./
+COPY backend/go.mod backend/go.sum ./
 # Cache mount keeps the module cache across builds so a transient CDN blip on
 # retry resumes instead of re-fetching every zip from scratch.
 RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     go mod download
 
 # Copy backend source first
-COPY console/backend/ ./
+COPY backend/ ./
 
 # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
@@ -143,7 +143,7 @@ COPY --from=backend-builder --chown=sub2api:sub2api /app/backend/resources /app/
 RUN mkdir -p /app/data && chown sub2api:sub2api /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to sub2api)
-COPY console/deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)

@@ -1,18 +1,25 @@
 **
 
-!console/
-!console/frontend/
-!console/frontend/**
-console/frontend/node_modules/
-console/frontend/dist/
+!Dockerfile
+!Dockerfile.dockerignore
 
-!console/backend/
-!console/backend/**
-console/backend/vendor/
-console/backend/bin/
+!frontend/
+!frontend/**
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/vite.config.js.timestamp-*
+frontend/node_modules/
+frontend/dist/
 
-!console/deploy/
-!console/deploy/docker-entrypoint.sh
+!backend/
+!backend/**
+backend/internal/web/dist/
+backend/vendor/
+backend/bin/
+
+!deploy/
+!deploy/docker-entrypoint.sh
 
 !docs/
 !docs/legal/

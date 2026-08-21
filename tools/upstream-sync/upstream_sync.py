@@ -82,7 +82,7 @@ def _redact_diagnostic(value):
         ) + suffix
 
     text = re.sub(
-        r"(?:https?|ssh|file)://[^\s'\"]+",
+        r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+",
         redact_url,
         text,
         flags=re.IGNORECASE,
@@ -200,6 +200,29 @@ class GitRepository:
         if actual != expected:
             raise UpgradeBlocked("report blob identity mismatch")
         return actual
+
+    def read_blob_bytes(self, revision, path, cwd=None):
+        if not OBJECT_ID_PATTERN.fullmatch(revision):
+            raise UpgradeBlocked("Git blob revision is invalid")
+        try:
+            _validate_repo_paths("Git blob path", [path])
+        except ManifestValidationError as error:
+            raise UpgradeBlocked(str(error)) from error
+        argv = [
+            "git",
+            "-C",
+            str(cwd or self.root),
+            "cat-file",
+            "blob",
+            f"{revision}:{path}",
+        ]
+        self.commands.append(argv)
+        environment = dict(self.environment)
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        completed = subprocess.run(argv, env=environment, capture_output=True)
+        if completed.returncode != 0:
+            raise UpgradeBlocked("Git configuration blob lookup failed")
+        return completed.stdout
 
 
 def parse_cli(arguments):
@@ -600,10 +623,13 @@ def classify_migration_sql(content):
     text = re.sub(r"(?m)--[^\n]*$", " ", text)
     normalized = " ".join(text.upper().split())
     destructive_patterns = (
-        r"\bDROP\s+(?:TABLE|SCHEMA|DATABASE|INDEX|VIEW|TYPE)\b",
+        r"\bDROP\s+(?:TABLE|SCHEMA|DATABASE|INDEX|VIEW|MATERIALIZED\s+VIEW|TYPE)\b",
         r"\bTRUNCATE\b",
         r"\bDELETE\s+FROM\b",
         r"\bALTER\s+TABLE\b.*\bDROP\s+(?:COLUMN|CONSTRAINT)\b",
+        r"\bALTER\s+TABLE\b.*\bRENAME\s+COLUMN\b",
+        r"\bALTER\s+TABLE\b.*\bRENAME\s+TO\b",
+        r"\bALTER\s+TABLE\b.*\bALTER\s+COLUMN\b.*\bTYPE\b",
     )
     if any(re.search(pattern, normalized) for pattern in destructive_patterns):
         return "destructive"
@@ -923,7 +949,7 @@ def _sort_report_lists(value):
 
 
 REPORT_STATUSES = frozenset(("PASS", "FAIL", "KNOWN-FAIL", "BLOCKED", "NOT-RUN"))
-SUCCESS_REPORT_SCHEMA_VERSION = 1
+SUCCESS_REPORT_SCHEMA_VERSION = 2
 SUCCESS_REPORT_KEYS = frozenset(
     (
         "candidate_head",
@@ -931,13 +957,20 @@ SUCCESS_REPORT_KEYS = frozenset(
         "configuration_hashes",
         "critical_commands",
         "exact_comparison",
+        "file_changes",
         "full_go",
         "full_vitest",
         "generated",
         "migrations",
+        "ownership",
+        "peeled_commit",
         "release",
         "schema_version",
+        "seams",
+        "source_commit",
         "status",
+        "tag_object",
+        "upstream_tree",
         "validation_summary_sha256",
     )
 )
@@ -1350,7 +1383,7 @@ def _validate_commands(field, commands):
         raise ManifestValidationError(f"{field} names must be sorted and unique")
 
 
-def validate_manifest(manifest, changed_paths):
+def validate_manifest(manifest, changed_paths, *, require_exact=False):
     """Return deterministic ownership details for changed repository paths."""
     actual_keys = set(manifest)
     if actual_keys != MANIFEST_TOP_LEVEL_KEYS:
@@ -1422,7 +1455,9 @@ def validate_manifest(manifest, changed_paths):
         },
         "shared_seams": sorted(manifest["shared_seams"]),
         "generated": sorted(manifest["generated"]["paths"]),
+        "registered": sorted(owners_by_path),
     }
+    extra_registered = sorted(set(owners_by_path) - set(changed))
     orphan_seams = [
         path for path in report["shared_seams"] if path not in owners_by_path
     ]
@@ -1439,6 +1474,10 @@ def validate_manifest(manifest, changed_paths):
             for path, layers in report["multiply_owned"].items()
         )
         raise ManifestValidationError("multiply owned paths: " + details)
+    if require_exact and extra_registered:
+        raise ManifestValidationError(
+            "registered paths absent from fork diff: " + ", ".join(extra_registered)
+        )
     if orphan_seams:
         raise ManifestValidationError(
             "orphan shared_seams: " + ", ".join(orphan_seams)
@@ -1448,6 +1487,132 @@ def validate_manifest(manifest, changed_paths):
             "orphan generated paths: " + ", ".join(orphan_generated)
         )
     return report
+
+
+def _nul_fields(value, label):
+    if not isinstance(value, str) or (value and not value.endswith("\x00")):
+        raise UpgradeBlocked(f"{label} did not return a terminated NUL stream")
+    return value[:-1].split("\x00") if value else []
+
+
+def _tree_regular_file(repository, commit, path, cwd):
+    output = repository.run(
+        "ls-tree",
+        "-z",
+        commit,
+        "--",
+        path,
+        cwd=cwd,
+        operation="Git tree path inspection",
+        read_only=True,
+    ).stdout
+    fields = _nul_fields(output, "Git tree path inspection")
+    if not fields:
+        return None
+    if len(fields) != 1:
+        raise UpgradeBlocked("Git tree path inspection returned duplicate entries")
+    metadata, separator, actual_path = fields[0].partition("\t")
+    parts = metadata.split(" ")
+    if separator != "\t" or actual_path != path or len(parts) != 3:
+        raise UpgradeBlocked("Git tree path inspection was malformed")
+    mode, object_type, object_id = parts
+    if (
+        object_type != "blob"
+        or mode not in {"100644", "100755"}
+        or not OBJECT_ID_PATTERN.fullmatch(object_id)
+    ):
+        raise UpgradeBlocked(f"fork diff path is not a regular file: {path}")
+    return (mode, object_id)
+
+
+def _git_change_summary(repository, old_commit, new_commit, cwd):
+    for label, commit in (("old", old_commit), ("new", new_commit)):
+        if not isinstance(commit, str) or not OBJECT_ID_PATTERN.fullmatch(commit):
+            raise UpgradeBlocked(f"{label} Git diff commit is invalid")
+        object_type = repository.run(
+            "cat-file",
+            "-t",
+            commit,
+            cwd=cwd,
+            operation=f"{label} Git diff commit inspection",
+            read_only=True,
+        ).stdout.strip()
+        if object_type != "commit":
+            raise UpgradeBlocked(f"{label} Git diff object is not a commit")
+    fields = _nul_fields(
+        repository.run(
+            "diff",
+            "--name-status",
+            "-z",
+            "--no-renames",
+            old_commit,
+            new_commit,
+            "--",
+            cwd=cwd,
+            operation="fork file-change inspection",
+            read_only=True,
+        ).stdout,
+        "fork file-change inspection",
+    )
+    if len(fields) % 2:
+        raise UpgradeBlocked("fork file-change inspection was malformed")
+    buckets = {"A": [], "D": [], "M": []}
+    seen = set()
+    for index in range(0, len(fields), 2):
+        status_code, path = fields[index : index + 2]
+        if status_code not in buckets:
+            raise UpgradeBlocked(f"unsupported fork file-change status: {status_code}")
+        try:
+            _validate_repo_paths("fork diff", [path])
+        except ManifestValidationError as error:
+            raise UpgradeBlocked(str(error)) from error
+        if path in seen:
+            raise UpgradeBlocked("fork file-change paths are not unique")
+        seen.add(path)
+        old_entry = _tree_regular_file(repository, old_commit, path, cwd)
+        new_entry = _tree_regular_file(repository, new_commit, path, cwd)
+        if (
+            (status_code == "A" and (old_entry is not None or new_entry is None))
+            or (status_code == "D" and (old_entry is None or new_entry is not None))
+            or (status_code == "M" and (old_entry is None or new_entry is None))
+        ):
+            raise UpgradeBlocked(f"fork file-change identity is inconsistent: {path}")
+        buckets[status_code].append(path)
+    for paths in buckets.values():
+        paths.sort()
+    all_paths = sorted(seen)
+    path_bytes = ("\x00".join(all_paths) + ("\x00" if all_paths else "")).encode(
+        "utf-8"
+    )
+    return {
+        "added": buckets["A"],
+        "counts": {
+            "added": len(buckets["A"]),
+            "deleted": len(buckets["D"]),
+            "modified": len(buckets["M"]),
+            "total": len(all_paths),
+        },
+        "deleted": buckets["D"],
+        "modified": buckets["M"],
+        "paths_sha256": hashlib.sha256(path_bytes).hexdigest(),
+    }
+
+
+def _summary_paths(summary):
+    return sorted(summary["added"] + summary["deleted"] + summary["modified"])
+
+
+def _strict_fork_ownership(repository, manifest, old_commit, source_commit, cwd):
+    changes = _git_change_summary(repository, old_commit, source_commit, cwd)
+    changed = _summary_paths(changes)
+    ownership = validate_manifest(manifest, changed, require_exact=True)
+    return changes, {
+        "changed": changed,
+        "multiply_owned": ownership["multiply_owned"],
+        "registered": ownership["registered"],
+        "status": "PASS",
+        "unowned": ownership["unowned"],
+    }
 
 
 def _require_clean_source(repository):
@@ -1588,7 +1753,7 @@ def _configuration_paths(repository):
     return paths
 
 
-def verify_current(repository):
+def verify_current(repository, *, ownership_commit=None, check_ownership=True):
     """Verify the locked fork baseline without writing Git or state."""
     _require_clean_source(repository)
     paths = _configuration_paths(repository)
@@ -1596,14 +1761,6 @@ def verify_current(repository):
     known_failures = load_json_document(paths["known_failures"])
     baseline = load_json_document(paths["migrations"])
     lock = load_json_document(paths["lock"])
-    owned_paths = []
-    for layer in OWNER_LAYER_KEYS:
-        value = manifest.get(layer)
-        if isinstance(value, dict) and isinstance(value.get("paths"), list):
-            owned_paths.extend(value["paths"])
-    ownership = validate_manifest(manifest, owned_paths)
-    if ownership["owned"] != sorted(owned_paths):
-        raise UpgradeBlocked("manifest owner union is not internally exhaustive")
     migrations = validate_migrations(repository.root, baseline)
     _validate_upstream_lock(lock)
     validate_known_failures(known_failures)
@@ -1640,6 +1797,20 @@ def verify_current(repository):
     if ancestor.returncode != 0:
         raise UpgradeBlocked("unable to validate locked commit ancestry")
 
+    customization_changes = {}
+    ownership = {}
+    if check_ownership:
+        customization_changes, ownership = _strict_fork_ownership(
+            repository,
+            manifest,
+            lock["peeled_commit"],
+            ownership_commit
+            or repository.run(
+                "rev-parse", "HEAD", operation="source commit lookup", read_only=True
+            ).stdout.strip(),
+            repository.root,
+        )
+
     remote_url = repository.run(
         "remote",
         "get-url",
@@ -1655,6 +1826,8 @@ def verify_current(repository):
         "manifest": manifest,
         "known_failures": known_failures,
         "migrations": migrations,
+        "ownership": ownership,
+        "customization_changes": customization_changes,
         "hashes": {
             name: _raw_sha256(path) for name, path in sorted(paths.items())
         },
@@ -1918,6 +2091,9 @@ EVIDENCE_MAPPING_KEYS = {
     "report_blobs": frozenset(("json", "markdown")),
     "report_content_sha256": frozenset(("json", "markdown")),
 }
+CONFLICT_KEYS = frozenset(
+    ("binding_sha256", "customization_sha256", "paths")
+)
 
 
 def _validate_hash_mapping(values, expected_keys, pattern, label):
@@ -1944,7 +2120,7 @@ def _load_state(repository, storage):
             raise ValueError("state root must be an object")
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         raise UpgradeBlocked("upgrade state is not valid strict JSON") from error
-    allowed_keys = STATE_KEYS | {"evidence"}
+    allowed_keys = STATE_KEYS | {"conflicts", "evidence"}
     if not STATE_KEYS.issubset(state) or not set(state).issubset(allowed_keys):
         missing = ",".join(sorted(STATE_KEYS - set(state))) or "none"
         extra = ",".join(sorted(set(state) - allowed_keys)) or "none"
@@ -1970,6 +2146,24 @@ def _load_state(repository, storage):
         raise UpgradeBlocked("upgrade state internal_ref does not match release")
     if state["phase"] not in {"merging", "conflicted", "validating", "merged"}:
         raise UpgradeBlocked("upgrade state phase is invalid")
+    if state["phase"] == "conflicted" and "conflicts" not in state:
+        raise UpgradeBlocked("conflicted upgrade state requires conflict evidence")
+    if "conflicts" in state:
+        conflicts = state["conflicts"]
+        if not isinstance(conflicts, dict) or set(conflicts) != CONFLICT_KEYS:
+            raise UpgradeBlocked("upgrade state conflict evidence keys are invalid")
+        paths = conflicts["paths"]
+        try:
+            _validate_repo_paths("conflict paths", paths)
+        except ManifestValidationError as error:
+            raise UpgradeBlocked(str(error)) from error
+        if paths != sorted(set(paths)) or not paths:
+            raise UpgradeBlocked("upgrade state conflict paths are invalid")
+        for field in ("binding_sha256", "customization_sha256"):
+            if not isinstance(conflicts[field], str) or not SHA256_PATTERN.fullmatch(
+                conflicts[field]
+            ):
+                raise UpgradeBlocked(f"upgrade state conflict {field} is invalid")
     if "evidence" in state:
         evidence = state["evidence"]
         if not isinstance(evidence, dict) or set(evidence) != EVIDENCE_KEYS:
@@ -2463,6 +2657,93 @@ def _success_report_digest(report):
     ).hexdigest()
 
 
+def _source_configuration_hashes(repository, source_commit, worktree):
+    relative_paths = {
+        "customization": ".steadflow/customization.yml",
+        "known_failures": ".steadflow/known-failures.yml",
+        "lock": ".steadflow/upstream-lock.json",
+        "migrations": ".steadflow/migration-checksums.json",
+    }
+    return {
+        name: hashlib.sha256(
+            repository.read_blob_bytes(source_commit, path, cwd=worktree)
+        ).hexdigest()
+        for name, path in sorted(relative_paths.items())
+    }
+
+
+def _upgrade_audit_context(repository, state, worktree, manifest, lock):
+    _validate_upstream_lock(lock)
+    locked_tree = repository.run(
+        "rev-parse",
+        f"{lock['peeled_commit']}^{{tree}}",
+        cwd=worktree,
+        operation="locked upstream tree inspection",
+        read_only=True,
+    ).stdout.strip()
+    if locked_tree != lock["tree"]:
+        raise UpgradeBlocked("candidate lock tree does not match locked commit")
+    candidate_paths = _configuration_paths(GitRepository(worktree))
+    candidate_configuration_hashes = {
+        name: _raw_sha256(path) for name, path in sorted(candidate_paths.items())
+    }
+    if candidate_configuration_hashes != _source_configuration_hashes(
+        repository, state["source_commit"], worktree
+    ):
+        raise UpgradeBlocked("candidate configuration differs from source commit")
+    for ancestor, descendant, label in (
+        (lock["peeled_commit"], state["source_commit"], "source"),
+        (lock["peeled_commit"], state["peeled_commit"], "target release"),
+    ):
+        if not _is_ancestor(repository, ancestor, descendant, worktree):
+            raise UpgradeBlocked(f"locked upstream commit is not an ancestor of {label}")
+    customization_changes, ownership = _strict_fork_ownership(
+        repository,
+        manifest,
+        lock["peeled_commit"],
+        state["source_commit"],
+        worktree,
+    )
+    upstream_changes = _git_change_summary(
+        repository, lock["peeled_commit"], state["peeled_commit"], worktree
+    )
+    upstream_tree = repository.run(
+        "rev-parse",
+        f"{state['peeled_commit']}^{{tree}}",
+        cwd=worktree,
+        operation="target upstream tree inspection",
+        read_only=True,
+    ).stdout.strip()
+    if not OBJECT_ID_PATTERN.fullmatch(upstream_tree):
+        raise UpgradeBlocked("target upstream tree is invalid")
+    registered_seams = sorted(manifest["shared_seams"])
+    changed_seams = sorted(
+        set(registered_seams).intersection(_summary_paths(upstream_changes))
+    )
+    conflict_seams = list(state.get("conflicts", {}).get("paths", []))
+    if sorted(set(conflict_seams)) != conflict_seams or not set(
+        conflict_seams
+    ).issubset(registered_seams):
+        raise UpgradeBlocked("candidate conflict seams are invalid")
+    return {
+        "file_changes": {
+            "fork_customizations": customization_changes,
+            "upstream": upstream_changes,
+        },
+        "ownership": ownership,
+        "peeled_commit": state["peeled_commit"],
+        "seams": {
+            "changed": changed_seams,
+            "conflicts": conflict_seams,
+            "registered": registered_seams,
+            "status": "PASS",
+        },
+        "source_commit": state["source_commit"],
+        "tag_object": state["tag_object"],
+        "upstream_tree": upstream_tree,
+    }
+
+
 def _validate_success_report(report, state, worktree):
     """Fail closed unless a report fully proves every candidate gate."""
     if not isinstance(report, dict) or set(report) != SUCCESS_REPORT_KEYS:
@@ -2530,9 +2811,18 @@ def _validate_success_report(report, state, worktree):
     candidate_repository = GitRepository(worktree)
     paths = _configuration_paths(candidate_repository)
     manifest = load_json_document(paths["customization"])
+    lock = load_json_document(paths["lock"])
     expected_configuration = {
         name: _raw_sha256(path) for name, path in sorted(paths.items())
     }
+    expected_audit = _upgrade_audit_context(
+        candidate_repository, state, worktree, manifest, lock
+    )
+    for field, expected in expected_audit.items():
+        if report[field] != expected:
+            raise UpgradeBlocked(
+                f"candidate success report {field} binding is invalid"
+            )
     expected_critical = [
         f"command:{command['name']}" for command in manifest["critical_commands"]
     ]
@@ -2596,15 +2886,11 @@ def validate_upgrade_candidate(repository, state, worktree):
             }
         )
         manifest = load_json_document(paths["customization"])
+        lock = load_json_document(paths["lock"])
         baseline = load_json_document(paths["migrations"])
         known = load_json_document(paths["known_failures"])
-        validate_manifest(
-            manifest,
-            [
-                path
-                for layer in OWNER_LAYER_KEYS
-                for path in manifest[layer]["paths"]
-            ],
+        audit_context = _upgrade_audit_context(
+            repository, state, worktree, manifest, lock
         )
         validate_known_failures(known)
         migrations = validate_migrations(worktree, baseline)
@@ -2613,7 +2899,13 @@ def validate_upgrade_candidate(repository, state, worktree):
         go_completed = _run_validation_process(
             repository, ["go", "test", "-json", "./..."], Path(worktree) / "backend"
         )
-        go_results = parse_go_test_jsonl(go_completed.stdout)
+        try:
+            go_results = parse_go_test_jsonl(go_completed.stdout)
+        except ValueError as error:
+            detail = str(error)
+            if go_completed.stderr.strip():
+                detail += ": " + go_completed.stderr.strip()
+            raise UpgradeBlocked(_redact_diagnostic(detail)) from error
         if not go_results["passed"] and not go_results["failed"]:
             raise UpgradeBlocked("full Go executed zero tests")
         if go_completed.returncode != 0 and not go_results["failed"]:
@@ -2638,8 +2930,17 @@ def validate_upgrade_candidate(repository, state, worktree):
         try:
             vitest_document = json.loads(vitest_completed.stdout)
         except json.JSONDecodeError as error:
-            raise UpgradeBlocked("full Vitest did not emit valid JSON") from error
-        vitest_results = parse_vitest_json(vitest_document, repo_root=worktree)
+            detail = "full Vitest did not emit valid JSON"
+            if vitest_completed.stderr.strip():
+                detail += ": " + vitest_completed.stderr.strip()
+            raise UpgradeBlocked(_redact_diagnostic(detail)) from error
+        try:
+            vitest_results = parse_vitest_json(vitest_document, repo_root=worktree)
+        except ValueError as error:
+            detail = str(error)
+            if vitest_completed.stderr.strip():
+                detail += ": " + vitest_completed.stderr.strip()
+            raise UpgradeBlocked(_redact_diagnostic(detail)) from error
         if not vitest_results["passed"] and not vitest_results["failed"]:
             raise UpgradeBlocked("full Vitest executed zero tests")
         if vitest_completed.returncode != 0 and not vitest_results["failed"]:
@@ -2710,13 +3011,20 @@ def validate_upgrade_candidate(repository, state, worktree):
         "configuration_hashes": report["configuration_hashes"],
         "critical_commands": report["critical_commands"],
         "exact_comparison": report["tests"]["comparison"],
+        "file_changes": audit_context["file_changes"],
         "full_go": report["tests"]["go"],
         "full_vitest": report["tests"]["vitest"],
         "generated": report["generated"],
         "migrations": report["migrations"],
+        "ownership": audit_context["ownership"],
+        "peeled_commit": audit_context["peeled_commit"],
         "release": state["release"],
         "schema_version": SUCCESS_REPORT_SCHEMA_VERSION,
+        "seams": audit_context["seams"],
+        "source_commit": audit_context["source_commit"],
         "status": report["status"],
+        "tag_object": audit_context["tag_object"],
+        "upstream_tree": audit_context["upstream_tree"],
         "validation_summary_sha256": "",
     }
     success["validation_summary_sha256"] = _success_report_digest(success)
@@ -2756,6 +3064,117 @@ def _run_and_persist_candidate_validation(repository, storage, state, worktree):
     state["phase"] = "merged"
     _write_state(storage, state)
     return state
+
+
+def _conflict_binding_sha256(state, paths, customization_sha256):
+    payload = {
+        "customization_sha256": customization_sha256,
+        "paths": paths,
+        "peeled_commit": state["peeled_commit"],
+        "release": state["release"],
+        "source_commit": state["source_commit"],
+        "tag_object": state["tag_object"],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _unmerged_paths(repository, worktree):
+    fields = _nul_fields(
+        repository.run(
+            "diff",
+            "--name-only",
+            "-z",
+            "--diff-filter=U",
+            "--",
+            cwd=worktree,
+            operation="unmerged path inspection",
+            read_only=True,
+        ).stdout,
+        "unmerged path inspection",
+    )
+    try:
+        _validate_repo_paths("conflict paths", fields)
+    except ManifestValidationError as error:
+        raise UpgradeBlocked(str(error)) from error
+    if len(fields) != len(set(fields)):
+        raise UpgradeBlocked("unmerged path inspection returned duplicates")
+    return sorted(fields)
+
+
+def _record_merge_conflicts(repository, storage, state, worktree):
+    conflict_paths = _unmerged_paths(repository, worktree)
+    if not conflict_paths:
+        raise UpgradeBlocked("git merge failed without inspectable conflict paths")
+    paths = _configuration_paths(GitRepository(worktree))
+    manifest = load_json_document(paths["customization"])
+    # Validate the manifest shape and its owned annotations before trusting seams.
+    validate_manifest(
+        manifest,
+        [
+            path
+            for layer in OWNER_LAYER_KEYS
+            for path in manifest[layer]["paths"]
+        ],
+    )
+    customization_sha256 = _raw_sha256(paths["customization"])
+    source_customization_sha256 = _source_configuration_hashes(
+        repository, state["source_commit"], worktree
+    )["customization"]
+    if customization_sha256 != source_customization_sha256:
+        raise UpgradeBlocked("customization changed during upstream merge")
+    state["conflicts"] = {
+        "binding_sha256": _conflict_binding_sha256(
+            state, conflict_paths, customization_sha256
+        ),
+        "customization_sha256": customization_sha256,
+        "paths": conflict_paths,
+    }
+    state["phase"] = "conflicted"
+    _write_state(storage, state)
+    unregistered = sorted(set(conflict_paths) - set(manifest["shared_seams"]))
+    if unregistered:
+        raise UpgradeBlocked(
+            "unregistered conflict paths: " + ", ".join(unregistered)
+        )
+    return state["conflicts"]
+
+
+def _require_recorded_conflicts(repository, state, worktree):
+    conflicts = state.get("conflicts")
+    if conflicts is None:
+        if state["phase"] == "conflicted":
+            raise UpgradeBlocked("conflicted upgrade state requires conflict evidence")
+        return []
+    expected_binding = _conflict_binding_sha256(
+        state, conflicts["paths"], conflicts["customization_sha256"]
+    )
+    if conflicts["binding_sha256"] != expected_binding:
+        raise UpgradeBlocked("upgrade state conflict evidence binding is invalid")
+    source_customization_sha256 = _source_configuration_hashes(
+        repository, state["source_commit"], worktree
+    )["customization"]
+    if conflicts["customization_sha256"] != source_customization_sha256:
+        raise UpgradeBlocked("upgrade state conflict configuration binding is invalid")
+    paths = _configuration_paths(GitRepository(worktree))
+    if _raw_sha256(paths["customization"]) != conflicts["customization_sha256"]:
+        raise UpgradeBlocked("customization changed after merge conflict capture")
+    manifest = load_json_document(paths["customization"])
+    validate_manifest(
+        manifest,
+        [
+            path
+            for layer in OWNER_LAYER_KEYS
+            for path in manifest[layer]["paths"]
+        ],
+    )
+    unregistered = sorted(set(conflicts["paths"]) - set(manifest["shared_seams"]))
+    if unregistered:
+        raise UpgradeBlocked(
+            "unregistered conflict paths: " + ", ".join(unregistered)
+        )
+    return conflicts["paths"]
 
 
 def create_upgrade_candidate(repository, release):
@@ -2836,8 +3255,7 @@ def _create_upgrade_candidate_locked(repository, release, storage):
         check=False,
     )
     if merge.returncode != 0:
-        state["phase"] = "conflicted"
-        _write_state(storage, state)
+        _record_merge_conflicts(repository, storage, state, worktree)
         raise UpgradeBlocked(
             f"merge conflict preserved in {worktree}; resolve and run --continue"
         )
@@ -3018,14 +3436,15 @@ def _require_clean_candidate(repository, worktree):
 
 def resume_upgrade(repository):
     """Validate and continue a preserved merge without choosing resolutions."""
-    verify_current(repository)
+    verify_current(repository, check_ownership=False)
     with _UpgradeStorage(repository) as storage:
-        verify_current(repository)
-        return _resume_upgrade_locked(repository, storage)
+        loaded = _load_state(repository, storage)
+        verify_current(repository, ownership_commit=loaded[1]["source_commit"])
+        return _resume_upgrade_locked(repository, storage, loaded=loaded)
 
 
-def _resume_upgrade_locked(repository, storage):
-    state_path, state = _load_state(repository, storage)
+def _resume_upgrade_locked(repository, storage, *, loaded=None):
+    state_path, state = loaded or _load_state(repository, storage)
     source_identity = _source_identity(repository)
     source_advanced = source_identity[0] != state["source_commit"]
     if source_advanced and state["phase"] != "merged":
@@ -3036,6 +3455,7 @@ def _resume_upgrade_locked(repository, storage):
         source_identity=source_identity,
         allow_source_advance=source_advanced,
     )
+    _require_recorded_conflicts(repository, state, worktree)
     candidate_head = repository.run(
         "rev-parse",
         "HEAD",
@@ -3066,15 +3486,10 @@ def _resume_upgrade_locked(repository, storage):
             repository, storage, state, worktree
         )
 
-    unmerged = repository.run(
-        "diff",
-        "--name-only",
-        "--diff-filter=U",
-        cwd=worktree,
-        operation="unmerged path inspection",
-        read_only=True,
-    ).stdout.splitlines()
+    unmerged = _unmerged_paths(repository, worktree)
     if unmerged:
+        if state["phase"] == "merging" and "conflicts" not in state:
+            _record_merge_conflicts(repository, storage, state, worktree)
         raise UpgradeBlocked(
             "unmerged paths remain in candidate: " + ", ".join(sorted(unmerged))
         )
@@ -3116,8 +3531,7 @@ def _resume_upgrade_locked(repository, storage):
             check=False,
         )
         if restarted.returncode != 0:
-            state["phase"] = "conflicted"
-            _write_state(storage, state)
+            _record_merge_conflicts(repository, storage, state, worktree)
             raise UpgradeBlocked(
                 f"merge conflict preserved in {worktree}; resolve and run --continue"
             )

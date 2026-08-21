@@ -341,6 +341,15 @@ class OwnershipManifestTests(unittest.TestCase):
         ):
             validate_manifest(manifest, ["backend/missing.go"])
 
+    def test_registered_path_absent_from_real_diff_blocks_exact_ownership(self):
+        manifest = manifest_with_paths(data=["data/README.md", "stale/path.txt"])
+
+        with self.assertRaisesRegex(
+            ManifestValidationError,
+            r"registered paths absent from fork diff: stale/path\.txt",
+        ):
+            validate_manifest(manifest, ["data/README.md"], require_exact=True)
+
     def test_path_in_two_owner_layers_blocks_validation(self):
         manifest = manifest_with_paths(
             data=["shared/file.go"],
@@ -1200,7 +1209,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         )
         return completed.stdout.strip()
 
-    def test_customization_manifest_matches_certified_task3_inventory(self):
+    def test_customization_manifest_matches_certified_inventory_and_tooling_delta(self):
         manifest = self.load_deterministic_json(".steadflow/customization.yml")
         expected_zlists = {
             "data": (
@@ -1216,12 +1225,12 @@ class RepositoryBaselineTests(unittest.TestCase):
                 "d8b17dec7473331bb561d72a9e492b7ff5705eab1abcd5ce7e2b20db428acf00",
             ),
             "thesis_public": (
-                28,
-                "440dbf19a5ecdcdfa0a1528e7ea491c119db9e2fb0d5dc60392fb1a3e4074638",
+                26,
+                "464bd23f4c2b3b976dff7caab98d38fd05e21914df193e9921e356cae184235c",
             ),
             "integration_adapter": (
-                400,
-                "326ff21ba98627bdbafb3a559393dc2d9ecb6d0e4e5e9afc608f65fb837a91f4",
+                407,
+                "75501881c8fa56f5aaddd636ca821e850f4d325ed7de67b3cc6620815e4af387",
             ),
         }
         for layer in OWNER_LAYER_KEYS:
@@ -1234,8 +1243,8 @@ class RepositoryBaselineTests(unittest.TestCase):
         certified_paths = [
             path for layer in OWNER_LAYER_KEYS for path in manifest[layer]["paths"]
         ]
-        self.assertEqual(len(certified_paths), 503)
-        self.assertEqual(len(set(certified_paths)), 503)
+        self.assertEqual(len(certified_paths), 508)
+        self.assertEqual(len(set(certified_paths)), 508)
         report = validate_manifest(manifest, certified_paths)
         self.assertEqual(report["owned"], sorted(certified_paths))
 
@@ -2016,6 +2025,22 @@ class MigrationRiskGateTests(unittest.TestCase):
             "review-required",
         )
 
+    def test_high_confidence_rename_type_and_materialized_view_sql_is_destructive(self):
+        destructive = (
+            b"ALTER TABLE users RENAME COLUMN email TO login;",
+            b"alter\n table users /* keep */ rename\n to app_users;",
+            b"ALTER TABLE users ALTER COLUMN score TYPE bigint USING score::bigint;",
+            b"drop materialized\n view if exists active_users;",
+        )
+        for sql in destructive:
+            with self.subTest(sql=sql):
+                self.assertEqual(classify_migration_sql(sql), "destructive")
+
+        self.assertEqual(
+            classify_migration_sql(b"ALTER TABLE users ENABLE ROW LEVEL SECURITY;"),
+            "review-required",
+        )
+
     def test_destructive_added_migration_is_blocked(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2409,6 +2434,29 @@ class UpgradeReportTests(unittest.TestCase):
         ):
             self.assertNotIn(secret, redacted)
 
+    def test_redactor_covers_database_and_cache_uri_userinfo_without_false_positive(self):
+        value = (
+            "postgres://user:pg-pass@db.example:5432/app "
+            "postgresql://:pg2-pass@db2.example/app "
+            "mysql://user:mysql-pass@mysql.example/catalog "
+            "redis://:redis-pass@cache.example/0 "
+            "rediss://user:rediss-pass@cache.example/1 ordinary x:y"
+        )
+
+        redacted = redact_report_secrets(value)
+
+        for secret in ("pg-pass", "pg2-pass", "mysql-pass", "redis-pass", "rediss-pass"):
+            self.assertNotIn(secret, redacted)
+        for diagnostic in (
+            "db.example:5432/app",
+            "db2.example/app",
+            "mysql.example/catalog",
+            "cache.example/0",
+            "cache.example/1",
+            "ordinary x:y",
+        ):
+            self.assertIn(diagnostic, redacted)
+
     def test_reports_reject_unknown_status_and_sort_object_lists_by_stable_key(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "report status"):
@@ -2698,7 +2746,16 @@ class HermeticUpgradeFixture:
         )
 
     def write_steadflow_configuration(self):
-        manifest = manifest_with_paths(data=["fork.txt"])
+        manifest = manifest_with_paths(
+            data=[
+                ".gitignore",
+                ".steadflow/customization.yml",
+                ".steadflow/known-failures.yml",
+                ".steadflow/migration-checksums.json",
+                ".steadflow/upstream-lock.json",
+                "fork.txt",
+            ]
+        )
         manifest["critical_commands"] = [
             {
                 "argv": ["go", "test", "./..."],
@@ -2893,11 +2950,19 @@ class HermeticUpgradeFixture:
         )
         return commit, tag_object
 
-    def create_source_conflict(self):
+    def create_source_conflict(self, *, register_seam=True):
+        manifest_path = self.fork / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["data"]["paths"].append("shared.txt")
+        manifest["data"]["paths"].sort()
+        if register_seam:
+            manifest["shared_seams"] = ["shared.txt"]
+        self.write_json(".steadflow/customization.yml", manifest)
         (self.fork / "shared.txt").write_text(
             "steadflow source\n", encoding="utf-8"
         )
-        self.run_git("add", "shared.txt", root=self.fork)
+        paths = ["shared.txt", ".steadflow/customization.yml"]
+        self.run_git("add", *paths, root=self.fork)
         self.run_git(
             "commit", "-m", "steadflow shared customization", root=self.fork
         )
@@ -3032,7 +3097,14 @@ class UpgradeCurrentVerificationTests(unittest.TestCase):
     def test_verify_current_reports_added_migration_without_blocking(self):
         added = self.fixture.fork / "backend" / "migrations" / "002_added.sql"
         added.write_text("SELECT 2;\n", encoding="utf-8")
-        self.fixture.run_git("add", str(added), root=self.fixture.fork)
+        manifest_path = self.fixture.fork / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["data"]["paths"].append("backend/migrations/002_added.sql")
+        manifest["data"]["paths"].sort()
+        self.fixture.write_json(".steadflow/customization.yml", manifest)
+        self.fixture.run_git(
+            "add", str(added), str(manifest_path), root=self.fixture.fork
+        )
         self.fixture.run_git(
             "commit", "-m", "add fixture migration", root=self.fixture.fork
         )
@@ -3041,6 +3113,50 @@ class UpgradeCurrentVerificationTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("backend/migrations/002_added.sql", completed.stdout)
+
+    def test_verify_current_blocks_real_fork_diff_path_missing_from_manifest(self):
+        unregistered = self.fixture.fork / "unregistered.txt"
+        unregistered.write_text("not declared\n", encoding="utf-8")
+        self.fixture.run_git("add", "unregistered.txt", root=self.fixture.fork)
+        self.fixture.run_git(
+            "commit", "-m", "add undeclared customization", root=self.fixture.fork
+        )
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("unowned paths: unregistered.txt", completed.stderr)
+
+    def test_verify_current_treats_rename_as_deleted_and_added_regular_paths(self):
+        self.fixture.run_git("mv", "shared.txt", "renamed-shared.txt", root=self.fixture.fork)
+        manifest_path = self.fixture.fork / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["data"]["paths"].extend(["renamed-shared.txt", "shared.txt"])
+        manifest["data"]["paths"].sort()
+        self.fixture.write_json(".steadflow/customization.yml", manifest)
+        self.fixture.run_git("add", ".steadflow/customization.yml", root=self.fixture.fork)
+        self.fixture.run_git("commit", "-m", "rename fixture path", root=self.fixture.fork)
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_verify_current_rejects_symlink_in_authenticated_fork_diff(self):
+        (self.fixture.fork / "linked.txt").symlink_to("fork.txt")
+        manifest_path = self.fixture.fork / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["data"]["paths"].append("linked.txt")
+        manifest["data"]["paths"].sort()
+        self.fixture.write_json(".steadflow/customization.yml", manifest)
+        self.fixture.run_git(
+            "add", "linked.txt", ".steadflow/customization.yml", root=self.fixture.fork
+        )
+        self.fixture.run_git("commit", "-m", "add fixture symlink", root=self.fixture.fork)
+
+        completed = self.fixture.run_upgrade("--verify-current")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("not a regular file: linked.txt", completed.stderr)
 
     def test_verify_current_uses_repo_root_when_invoked_from_subdirectory(self):
         source_before = self.fixture.source_snapshot()
@@ -3153,6 +3269,24 @@ class UpgradeCleanMergeTests(unittest.TestCase):
                 "rev-parse", f"{internal_ref}^{{commit}}", root=self.fixture.fork
             ).stdout.strip(),
             target_commit,
+        )
+
+        report_path = (
+            self.fixture.worktree_path(release)
+            / ".steadflow"
+            / "reports"
+            / f"{release}.json"
+        )
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(report["source_commit"], self.fixture.source_commit)
+        self.assertEqual(report["tag_object"], tag_object)
+        self.assertEqual(report["peeled_commit"], target_commit)
+        self.assertRegex(report["upstream_tree"], r"^[0-9a-f]{40}$")
+        self.assertEqual(report["ownership"]["status"], "PASS")
+        self.assertEqual(report["ownership"]["changed"], report["ownership"]["registered"])
+        self.assertEqual(report["seams"]["conflicts"], [])
+        self.assertEqual(
+            report["file_changes"]["upstream"]["counts"]["total"], 1
         )
 
         state = self.fixture.read_state()
@@ -3332,6 +3466,7 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
 
         worktree = self.fixture.worktree_path(self.release).resolve()
         self.assertEqual(state["phase"], "merged")
+
         self.assertEqual(
             [cwd for _, cwd in calls],
             [worktree / "backend", worktree, worktree, worktree / "backend", worktree],
@@ -3418,6 +3553,33 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
             "Steadflow Upgrade <upgrade@steadflow.invalid>|"
             f"{validated_date}|{validated_date}",
         )
+
+    def test_database_uri_secret_is_redacted_from_exception_json_and_markdown(self):
+        repository = self.fixture.repository()
+        base_runner = self.fixture.validation_runner
+        secret = "provider-password"
+        diagnostic = f"postgresql://user:{secret}@db.example:5432/app"
+
+        def failing_runner(argv, **kwargs):
+            if list(argv) == ["go", "test", "-json", "./..."]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    stdout=json.dumps({"Action": "fail", "Package": "fixture/pkg"})
+                    + "\n",
+                    stderr=diagnostic,
+                )
+            return base_runner(argv, **kwargs)
+
+        repository.validation_runner = failing_runner
+        with self.assertRaises(UpgradeBlocked) as raised:
+            create_upgrade_candidate(repository, self.release)
+
+        json_bytes = self.report_path().read_bytes()
+        markdown_bytes = self.report_path().with_suffix(".md").read_bytes()
+        combined = str(raised.exception).encode("utf-8") + json_bytes + markdown_bytes
+        self.assertNotIn(secret.encode("utf-8"), combined)
+        self.assertIn(b"db.example:5432/app", combined)
 
     def test_validation_failure_preserves_validating_state_and_continue_retries(self):
         repository = self.fixture.repository()
@@ -3634,6 +3796,62 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
         ):
             create_upgrade_candidate(repository, self.release)
 
+    def test_forged_canonical_source_identity_is_rejected_after_state_rebinding(self):
+        repository = self.fixture.repository()
+        create_upgrade_candidate(repository, self.release)
+        worktree = self.fixture.worktree_path(self.release)
+        report_path = self.report_path()
+        markdown_path = report_path.with_suffix(".md")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        report["source_commit"] = "0" * 40
+        summary = dict(report)
+        summary.pop("validation_summary_sha256")
+        report["validation_summary_sha256"] = hashlib.sha256(
+            json.dumps(summary, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        json_bytes = (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        markdown_bytes = (
+            f"# Steadflow upstream report: {self.release}\n\n```json\n"
+            + json_bytes.decode("utf-8").rstrip("\n")
+            + "\n```\n"
+        ).encode("utf-8")
+        report_path.write_bytes(json_bytes)
+        markdown_path.write_bytes(markdown_bytes)
+        self.fixture.run_git(
+            "add",
+            f".steadflow/reports/{self.release}.json",
+            f".steadflow/reports/{self.release}.md",
+            root=worktree,
+        )
+        self.fixture.run_git("commit", "--amend", "--no-edit", root=worktree)
+        state = self.fixture.read_state()
+        evidence = state["evidence"]
+        evidence["candidate_head"] = self.fixture.run_git(
+            "rev-parse", "HEAD", root=worktree
+        ).stdout.strip()
+        evidence["candidate_tree"] = self.fixture.run_git(
+            "rev-parse", "HEAD^{tree}", root=worktree
+        ).stdout.strip()
+        evidence["report_blobs"] = {
+            "json": self.fixture.run_git(
+                "rev-parse", f"HEAD:.steadflow/reports/{self.release}.json", root=worktree
+            ).stdout.strip(),
+            "markdown": self.fixture.run_git(
+                "rev-parse", f"HEAD:.steadflow/reports/{self.release}.md", root=worktree
+            ).stdout.strip(),
+        }
+        evidence["report_content_sha256"] = {
+            "json": hashlib.sha256(json_bytes).hexdigest(),
+            "markdown": hashlib.sha256(markdown_bytes).hexdigest(),
+        }
+        evidence["validation_summary_sha256"] = report["validation_summary_sha256"]
+        self.fixture.state_path.write_text(
+            json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(UpgradeBlocked, "source_commit binding is invalid"):
+            resume_upgrade(repository)
+
     def assert_complete_validation_calls(self, calls, critical_count=1):
         self.assertEqual(calls[0], ["go", "test", "-json", "./..."])
         self.assertIn("vitest", calls[1])
@@ -3741,17 +3959,24 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
                 "configuration_hashes",
                 "critical_commands",
                 "exact_comparison",
+                "file_changes",
                 "full_go",
                 "full_vitest",
                 "generated",
                 "migrations",
+                "ownership",
+                "peeled_commit",
                 "release",
                 "schema_version",
+                "seams",
+                "source_commit",
                 "status",
+                "tag_object",
+                "upstream_tree",
                 "validation_summary_sha256",
             },
         )
-        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["schema_version"], 2)
         summary = dict(report)
         summary_digest = summary.pop("validation_summary_sha256")
         expected_digest = hashlib.sha256(
@@ -3819,7 +4044,7 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
         self.assert_complete_validation_calls(calls)
         self.assertEqual(
             json.loads(self.report_path().read_text(encoding="utf-8"))["schema_version"],
-            1,
+            2,
         )
 
     def test_every_report_crash_point_reruns_the_complete_pipeline(self):
@@ -3966,6 +4191,59 @@ class UpgradeConflictContinueTests(unittest.TestCase):
 
     def test_conflict_is_preserved_without_abort_reset_or_resolution(self):
         self.start_conflict()
+        state = self.fixture.read_state()
+        self.assertEqual(state["conflicts"]["paths"], ["shared.txt"])
+
+    def test_unregistered_conflict_is_blocked_and_cannot_be_waived_on_continue(self):
+        fixture = HermeticUpgradeFixture()
+        self.addCleanup(fixture.cleanup)
+        fixture.create_source_conflict(register_seam=False)
+        release = "v1.1.0"
+        fixture.add_release(release, conflict=True)
+
+        initial = fixture.run_upgrade(release)
+
+        self.assertEqual(initial.returncode, 2)
+        self.assertIn("unregistered conflict paths: shared.txt", initial.stderr)
+        state = fixture.read_state()
+        self.assertEqual(state["phase"], "conflicted")
+        self.assertEqual(state["conflicts"]["paths"], ["shared.txt"])
+        worktree = Path(state["worktree"])
+        (worktree / "shared.txt").write_text("resolved\n", encoding="utf-8")
+        fixture.run_git("add", "shared.txt", root=worktree)
+
+        resumed = fixture.run_upgrade("--continue")
+
+        self.assertEqual(resumed.returncode, 2)
+        self.assertIn("unregistered conflict paths: shared.txt", resumed.stderr)
+        self.assertEqual(fixture.read_state()["phase"], "conflicted")
+
+    def test_continue_blocks_tampered_conflict_state_binding(self):
+        self.start_conflict()
+        state = self.fixture.read_state()
+        state["conflicts"]["paths"] = ["other.txt"]
+        self.fixture.state_path.write_text(
+            json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("conflict evidence binding is invalid", completed.stderr)
+
+    def test_continue_blocks_customization_change_after_conflict_capture(self):
+        worktree = self.start_conflict()
+        manifest_path = worktree / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["shared_seams"] = []
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+        completed = self.fixture.run_upgrade("--continue")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("customization changed after merge conflict capture", completed.stderr)
 
     def test_continue_blocks_while_unmerged_and_preserves_conflict(self):
         worktree = self.start_conflict()
@@ -4001,6 +4279,17 @@ class UpgradeConflictContinueTests(unittest.TestCase):
         state = self.fixture.read_state()
         self.assertEqual(state["phase"], "merged")
         self.assertEqual(set(state["evidence"]), EVIDENCE_KEYS)
+        report = json.loads(
+            (
+                worktree
+                / ".steadflow"
+                / "reports"
+                / f"{self.release}.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(report["seams"]["registered"], ["shared.txt"])
+        self.assertEqual(report["seams"]["changed"], ["shared.txt"])
+        self.assertEqual(report["seams"]["conflicts"], ["shared.txt"])
         self.assertEqual(
             self.fixture.run_git(
                 "status", "--porcelain=v2", root=worktree
@@ -4356,6 +4645,46 @@ class UpgradeCompletedLifecycleTests(unittest.TestCase):
             root=self.fixture.fork,
         )
 
+    def accept_upgrade_metadata(self):
+        manifest_path = self.fixture.fork / ".steadflow" / "customization.yml"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["integration_adapter"]["paths"].extend(
+            [
+                f".steadflow/reports/{self.first_release}.json",
+                f".steadflow/reports/{self.first_release}.md",
+            ]
+        )
+        manifest["integration_adapter"]["paths"].sort()
+        self.fixture.write_json(".steadflow/customization.yml", manifest)
+        lock_path = self.fixture.fork / ".steadflow" / "upstream-lock.json"
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        lock.update(
+            {
+                "peeled_commit": self.first_state["peeled_commit"],
+                "release": self.first_release,
+                "tree": self.fixture.run_git(
+                    "rev-parse",
+                    f"{self.first_state['peeled_commit']}^{{tree}}",
+                    root=self.fixture.fork,
+                ).stdout.strip(),
+            }
+        )
+        self.fixture.write_json(".steadflow/upstream-lock.json", lock)
+        known_path = self.fixture.fork / ".steadflow" / "known-failures.yml"
+        known = json.loads(known_path.read_text(encoding="utf-8"))
+        known["baseline"]["release"] = self.first_release
+        self.fixture.write_json(".steadflow/known-failures.yml", known)
+        self.fixture.run_git(
+            "add",
+            ".steadflow/customization.yml",
+            ".steadflow/known-failures.yml",
+            ".steadflow/upstream-lock.json",
+            root=self.fixture.fork,
+        )
+        self.fixture.run_git(
+            "commit", "-m", "accept fixture upgrade metadata", root=self.fixture.fork
+        )
+
     def assert_active_state_preserved(self):
         self.assertEqual(self.fixture.read_state(), self.first_state)
         self.assertFalse(
@@ -4395,6 +4724,7 @@ class UpgradeCompletedLifecycleTests(unittest.TestCase):
             source_after_merge,
         )
 
+        self.accept_upgrade_metadata()
         second_release = "v1.2.0"
         self.fixture.add_release(second_release)
         second = self.fixture.run_upgrade(second_release)
@@ -4577,7 +4907,7 @@ class UpgradePreflightFailureTests(unittest.TestCase):
         completed = self.fixture.run_upgrade(self.release)
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("escapes repository", completed.stderr)
+        self.assertRegex(completed.stderr, r"escapes repository|not a regular file")
         self.assertEqual(list(outside.iterdir()), [])
         self.assertFalse(self.fixture.state_path.exists())
 
@@ -5329,6 +5659,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
         )
         self.fixture.configure_identity(clone)
         for relative in (
+            ".steadflow/customization.yml",
             ".steadflow/known-failures.yml",
             "Makefile",
             "tools/upstream-sync/test_upstream_sync.py",
@@ -5343,6 +5674,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             "tools/upstream-sync/test_upstream_sync.py",
             "tools/upstream-sync/upstream_sync.py",
             "tools/upstream-sync/upgrade",
+            ".steadflow/customization.yml",
             ".steadflow/known-failures.yml",
             "Makefile",
             root=clone,
@@ -5401,6 +5733,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
         )
         self.fixture.configure_identity(clone)
         for relative in (
+            ".steadflow/customization.yml",
             ".steadflow/known-failures.yml",
             "Makefile",
             "tools/upstream-sync/test_upstream_sync.py",
@@ -5413,6 +5746,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             "tools/upstream-sync/test_upstream_sync.py",
             "tools/upstream-sync/upstream_sync.py",
             "tools/upstream-sync/upgrade",
+            ".steadflow/customization.yml",
             ".steadflow/known-failures.yml",
             "Makefile",
             root=clone,

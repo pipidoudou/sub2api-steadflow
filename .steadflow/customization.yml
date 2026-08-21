@@ -506,9 +506,14 @@
       ".github/workflows/cla.yml",
       ".github/workflows/release.yml",
       ".github/workflows/security-scan.yml",
+      ".github/workflows/steadflow-upstream-ci.yml",
       ".gitignore",
       ".goreleaser.simple.yaml",
       ".goreleaser.yaml",
+      ".steadflow/customization.yml",
+      ".steadflow/known-failures.yml",
+      ".steadflow/migration-checksums.json",
+      ".steadflow/upstream-lock.json",
       "DEV_GUIDE.md",
       "Dockerfile",
       "Dockerfile.dockerignore",
@@ -590,9 +595,8 @@
       "docs/COMPOSITE_GROUPS.md",
       "docs/PAYMENT.md",
       "docs/PAYMENT_CN.md",
+      "docs/UPSTREAM_SYNC.md",
       "docs/channel-monitor-v2-safe-defaults.md",
-      "docs/legal/admin-compliance.en.md",
-      "docs/legal/admin-compliance.zh.md",
       "docs/screenshots/mobile-account-actions-menu.png",
       "frontend/src/components/account/CreateAccountModal.vue",
       "frontend/src/components/account/__tests__/credentialsBuilder.spec.ts",
@@ -617,7 +621,10 @@
       "skills/sub2api-admin/SKILL.md",
       "skills/sub2api-admin/agents/openai.yaml",
       "skills/sub2api-admin/references/admin-cli.md",
-      "skills/sub2api-admin/scripts/sub2api-admin.js"
+      "skills/sub2api-admin/scripts/sub2api-admin.js",
+      "tools/upstream-sync/test_upstream_sync.py",
+      "tools/upstream-sync/upgrade",
+      "tools/upstream-sync/upstream_sync.py"
     ]
   },
   "schema_version": 1,
@@ -644,7 +651,6 @@
       "frontend/public/llms.txt",
       "frontend/public/pricing.md",
       "frontend/src/api/__tests__/settings.thesisVertical.spec.ts",
-      "frontend/src/components/admin/AdminComplianceDialog.vue",
       "frontend/src/router/__tests__/thesis-routes.spec.ts",
       "frontend/src/router/publicRoutePolicy.ts",
       "frontend/src/seo/__tests__/routeSeo.spec.ts",
@@ -655,7 +661,6 @@
       "frontend/src/utils/__tests__/publicSetupRoute.spec.ts",
       "frontend/src/utils/publicSetupRoute.ts",
       "frontend/src/views/auth/RegisterView.vue",
-      "frontend/src/views/public/LegalDocumentView.vue",
       "frontend/src/views/public/ThesisLandingView.vue",
       "frontend/src/views/user/PaymentView.vue"
     ]

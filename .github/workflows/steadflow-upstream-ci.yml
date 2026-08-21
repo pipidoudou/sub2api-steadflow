@@ -1,0 +1,107 @@
+name: Steadflow Upstream CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steadflow-upstream-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-upstream-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out candidate without credentials
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Go from module contract
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frozen frontend dependencies
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+
+      - name: Test upstream sync tooling
+        run: |
+          set -euo pipefail
+          python3 -m unittest tools/upstream-sync/test_upstream_sync.py -v
+
+      - name: Verify current Steadflow contracts
+        run: |
+          set -euo pipefail
+          ./tools/upstream-sync/upgrade --verify-current
+
+      - name: Verify generated backend code is committed
+        run: |
+          set -euo pipefail
+          make -C backend generate
+          GIT_OPTIONAL_LOCKS=0 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+
+      - name: Test upgrade-sensitive backend packages
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test ./internal/pkg/... ./internal/config ./internal/domain ./migrations ./ent/migrate
+
+      - name: Run Steadflow critical contracts
+        run: |
+          set -euo pipefail
+          make test-steadflow-critical
+
+      - name: Lint frontend
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run lint:check
+
+      - name: Typecheck frontend
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run typecheck
+
+      - name: Test frontend
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run test:run
+
+      - name: Build frontend
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run build
+
+      - name: Build candidate container without publishing
+        run: |
+          set -euo pipefail
+          docker build -f Dockerfile -t sub2api-steadflow:ci .

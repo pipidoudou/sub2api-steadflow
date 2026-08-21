@@ -7,7 +7,7 @@
 | 项目 | 说明 |
 |------|------|
 | **上游仓库** | Wei-Shaw/sub2api |
-| **Fork 仓库** | bayma888/sub2api-bmai |
+| **Fork 仓库** | pipidoudou/sub2api-steadflow |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
 | **数据库** | PostgreSQL 16 + Redis |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
@@ -49,12 +49,14 @@ npm install -g pnpm
 |----------|----------|----------|
 | **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.7 |
 | **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
+| **steadflow-upstream-ci.yml** | pull_request, workflow_dispatch | 上游契约、生成代码、后端关键包、Steadflow critical、完整前端与 Docker build |
 | **release.yml** | tag `v*` | 构建发布（PR 不触发） |
 
 ### CI 要求
 
-- Go 版本必须是 **1.25.7**
+- Go 版本以 `backend/go.mod` 为准，不在文档或 workflow 中硬编码补丁版本
 - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
+- Steadflow 上游候选流程见 [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md)
 
 ### 本地测试命令
 
@@ -264,18 +266,18 @@ psql -U sub2api -h 127.0.0.1 -d sub2api -f migration.sql
 ### Git 操作
 
 ```bash
-# 同步上游
-git fetch upstream
-git checkout main
-git merge upstream/main
-git push origin main
+# 同步官方 Release（不要直接 merge upstream/main）
+./tools/upstream-sync/upgrade --verify-current
+./tools/upstream-sync/upgrade vX.Y.Z
+# 冲突解决后恢复
+./tools/upstream-sync/upgrade --continue
 
 # 创建功能分支
 git checkout -b feature/xxx
 
-# Rebase 到最新 main
-git fetch upstream
-git rebase upstream/main
+# Rebase 到 fork 最新 main
+git fetch origin main
+git rebase origin/main
 ```
 
 ### 前端操作
@@ -313,7 +315,7 @@ golangci-lint run ./...
 ## 六、项目结构速览
 
 ```
-sub2api-bmai/
+sub2api-steadflow/
 ├── backend/
 │   ├── cmd/server/          # 主程序入口
 │   ├── ent/                 # Ent ORM 生成代码

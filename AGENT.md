@@ -52,3 +52,10 @@
   - 正式客户端更新 / 脚本市场：优先后台页面生成的运行时 `data/public/downloads/`
 - 当前仓库可能存在本地调试残留，如 `.agents/`、`Users/`、二进制产物；除非明确需要，否则不要提交。
 - 大文件和构建产物提交前要二次确认。
+
+## 上游升级长期入口
+
+- 官方 `Wei-Shaw/sub2api` Release 只能按 [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md) 在 `pipidoudou/sub2api-steadflow` 中生成、验证和审查升级候选；本 fork 是 console 的唯一编辑入口。
+- 当前契约只读校验：`./tools/upstream-sync/upgrade --verify-current`；创建候选：`./tools/upstream-sync/upgrade vX.Y.Z`；恢复候选：`./tools/upstream-sync/upgrade --continue`；关键门槛：`make test-steadflow-critical`。
+- 冲突只能人工处理 `.steadflow/customization.yml` 已登记的 `shared_seams`。不得修改或删除历史 migration，不得用 force-push、移动 tag 或 squash 合并破坏双祖先历史。
+- `upgrade` 不执行 push、PR 合并、tag、Provider/支付调用或部署。只读 CI 不接触生产 Secret；`china-models` 只从后续批准的不可变 `steadflow-vX.Y.Z-rN` tag 做 subtree 同步，生产部署另需 Plan 2 人工批准。

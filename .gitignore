@@ -133,6 +133,7 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/UPSTREAM_SYNC.md
 !docs/legal/
 docs/legal/*
 !docs/legal/admin-compliance.en.md

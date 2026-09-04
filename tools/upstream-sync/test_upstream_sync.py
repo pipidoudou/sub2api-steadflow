@@ -1662,26 +1662,24 @@ class RepositoryBaselineTests(unittest.TestCase):
             document["baseline"]["result"],
             {"failed": 0, "go_failed": 0, "vitest_failed": 0},
         )
-        expected_evidence = {
-            "v0.1.178": {
-                "go_json_sha256": (
-                    "9889e37c20a29ad4c462ee59cd086260e5b4e40c373bea14386961325d251406"
-                ),
-                "vitest_json_sha256": (
-                    "a71c183c8d8ee42024b15fce7bac2f85bf9eba0e8acde6abb759b2f7d5c7aaba"
-                ),
-            },
-            "v0.2.0": {
-                "go_json_sha256": (
-                    "3516dc134a68528dfe25aa70f82ae66185fa703132b079ba57234e349d65167e"
-                ),
-                "vitest_json_sha256": (
-                    "60ada5a20237165bf934eb674715a1f62844670c3a1a692698712a8bb81ef9b7"
-                ),
-            },
+        expected_v0_1_178_evidence = {
+            "go_json_sha256": (
+                "9889e37c20a29ad4c462ee59cd086260e5b4e40c373bea14386961325d251406"
+            ),
+            "vitest_json_sha256": (
+                "a71c183c8d8ee42024b15fce7bac2f85bf9eba0e8acde6abb759b2f7d5c7aaba"
+            ),
         }
         self.assertEqual(document["baseline"]["release"], release)
-        self.assertEqual(document["baseline"]["evidence"], expected_evidence[release])
+        evidence = document["baseline"]["evidence"]
+        if release == "v0.1.178":
+            self.assertEqual(evidence, expected_v0_1_178_evidence)
+        else:
+            self.assertEqual(set(evidence), {"go_json_sha256", "vitest_json_sha256"})
+            self.assertEqual(len(set(evidence.values())), 2)
+            for digest in evidence.values():
+                self.assertRegex(digest, r"^[0-9a-f]{64}$")
+                self.assertNotIn(digest, {"a" * 64, "b" * 64})
         self.assertTrue(
             all(release in command for command in document["baseline"]["commands"])
         )

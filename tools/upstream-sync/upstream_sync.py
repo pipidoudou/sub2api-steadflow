@@ -77,7 +77,8 @@ def _redact_diagnostic(value):
             port = f":{parsed.port}" if parsed.port is not None else ""
         except ValueError:
             port = ""
-        authority = hostname + port
+        authority_host = f"[{hostname}]" if ":" in hostname else hostname
+        authority = authority_host + port
         if parsed.username is not None or parsed.password is not None:
             authority = "<redacted>@" + authority
         suffix = ""

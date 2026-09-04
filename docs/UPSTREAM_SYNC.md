@@ -35,13 +35,7 @@ git status --short --branch
 - `.steadflow/reports/vX.Y.Z.json`
 - `.steadflow/reports/vX.Y.Z.md`
 
-发生冲突时保留现场。只允许人工处理 `.steadflow/customization.yml` 的 `shared_seams`：
-
-- `backend/internal/handler/handler.go`
-- `backend/internal/handler/wire.go`
-- `backend/internal/server/router.go`
-- `backend/internal/service/wire.go`
-- `frontend/src/router/index.ts`
+发生冲突时保留现场。只允许人工处理 `.steadflow/customization.yml` 当前版本精确登记的 `shared_seams`；该清单是唯一来源，包含核心 wiring/router，以及已经过审查的 CI、文档、版本、生成代码、设置解析和已迁出部署文件边界。不要在文档中维护第二份可能漂移的路径副本。
 
 若冲突路径不在登记的 shared seams、无法同时保持上游和 Steadflow 契约，或需要扩大所有权清单，停止并先审查设计，不要猜测解决。解决已登记冲突后在候选 worktree 中 stage 解决结果，再回到 fork 根目录继续：
 

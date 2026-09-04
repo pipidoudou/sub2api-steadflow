@@ -1264,6 +1264,7 @@ class RepositoryBaselineTests(unittest.TestCase):
                 "README_JA.md",
                 "backend/cmd/server/VERSION",
                 "backend/cmd/server/wire_gen.go",
+                "backend/go.sum",
                 "backend/internal/handler/handler.go",
                 "backend/internal/handler/wire.go",
                 "backend/internal/server/router.go",

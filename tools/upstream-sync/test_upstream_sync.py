@@ -4458,6 +4458,28 @@ class UpgradeConflictContinueTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("customization changed after merge conflict capture", completed.stderr)
 
+    def test_continue_recovers_conflicted_candidate_after_baseline_commit(self):
+        worktree = self.start_conflict()
+        (worktree / "shared.txt").write_text(
+            "resolved by fixture\n", encoding="utf-8"
+        )
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+        repository = self.fixture.repository()
+
+        def crash(event, **kwargs):
+            if event == "after_baseline_commit":
+                raise UpgradeBlocked("simulated crash after baseline commit")
+
+        repository.upgrade_test_hook = crash
+        with self.assertRaisesRegex(UpgradeBlocked, "simulated crash"):
+            resume_upgrade(repository)
+        self.assertEqual(self.fixture.read_state()["phase"], "validating")
+
+        repository.upgrade_test_hook = lambda *args, **kwargs: None
+        resumed = resume_upgrade(repository)
+
+        self.assertEqual(resumed["phase"], "merged")
+
     def test_continue_blocks_while_unmerged_and_preserves_conflict(self):
         worktree = self.start_conflict()
         merge_head_before = self.fixture.run_git(

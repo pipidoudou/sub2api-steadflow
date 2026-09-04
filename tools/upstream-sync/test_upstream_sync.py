@@ -4222,6 +4222,13 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
                                 "Test": "TestFixture/https://example.test/?token=hunter2",
                             }
                         ),
+                        json.dumps(
+                            {
+                                "Action": "pass",
+                                "Package": "fixture/pkg",
+                                "Test": "TestFixture/https://example.test/?token=other-secret",
+                            }
+                        ),
                         json.dumps({"Action": "pass", "Package": "fixture/pkg"}),
                     ]
                 ) + "\n"
@@ -4232,8 +4239,13 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
         create_upgrade_candidate(repository, self.release)
 
         report = json.loads(self.report_path().read_text(encoding="utf-8"))
-        self.assertNotIn("hunter2", json.dumps(report, sort_keys=True))
-        self.assertIn("?<redacted>", report["full_go"]["passed"][0])
+        serialized = json.dumps(report, sort_keys=True)
+        self.assertNotIn("hunter2", serialized)
+        self.assertNotIn("other-secret", serialized)
+        self.assertEqual(
+            report["full_go"]["passed"],
+            ["go:fixture/pkg:TestFixture/https://example.test/?<redacted>"],
+        )
         self.assertEqual(
             report["validation_summary_sha256"], _success_report_digest(report)
         )

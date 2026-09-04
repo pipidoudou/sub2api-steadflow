@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -114,6 +115,24 @@ func (h *PaymentHandler) RetryFulfillment(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"message": "fulfillment retried"})
+}
+
+// MarkManuallyFulfilled records that an administrator completed subscription
+// delivery outside the system. This path does not run automated fulfillment or
+// send a notification email.
+// POST /api/v1/admin/payment/orders/:id/mark-manually-fulfilled
+func (h *PaymentHandler) MarkManuallyFulfilled(c *gin.Context) {
+	orderID, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	operator := fmt.Sprintf("admin:%d", getAdminIDFromContext(c))
+	order, err := h.paymentService.ConfirmManualSubscriptionFulfillment(c.Request.Context(), orderID, operator)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, sanitizeAdminPaymentOrderForResponse(order))
 }
 
 type AdminPaymentOrderResult struct {

@@ -26,8 +26,8 @@
     <template #cell-payment_type="{ value }">
       <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.methods.' + value, value) }}</span>
     </template>
-    <template #cell-status="{ value }">
-      <OrderStatusBadge :status="value" />
+    <template #cell-status="{ value, row }">
+      <OrderStatusBadge :status="value" :label-key="statusLabelKey?.(row)" />
     </template>
     <template #cell-created_at="{ value }">
       <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(value) }}</span>
@@ -53,6 +53,7 @@ const props = defineProps<{
   orders: PaymentOrder[]
   loading: boolean
   showUser?: boolean
+  statusLabelKey?: (order: PaymentOrder) => string | undefined
 }>()
 
 function formatDate(dateStr: string) { return new Date(dateStr).toLocaleString() }

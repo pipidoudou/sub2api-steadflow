@@ -14,6 +14,7 @@ import type { OrderStatus } from '@/types/payment'
 
 const props = defineProps<{
   status: OrderStatus
+  labelKey?: string
 }>()
 
 const { t } = useI18n()
@@ -35,6 +36,7 @@ const statusMap: Record<OrderStatus, { key: string; class: string }> = {
 }
 
 const statusLabel = computed(() => {
+  if (props.labelKey) return t(props.labelKey)
   const entry = statusMap[props.status]
   return entry ? t(entry.key) : props.status
 })

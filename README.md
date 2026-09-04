@@ -1,10 +1,12 @@
 # Steadflow Console
 
-`console/` 是 `Steadflow` 的主后台项目，对应原 `sub2api` 主体。它承载服务端 API、用户控制台和管理后台；`china-models` 仅作为域名和技术兼容名称。本地/线上部署配置统一放在仓库根目录 `deploy/`。
+`console/` 是 `Steadflow` 唯一的 Sub2API 派生源码目录。它承载模型网关 API、用户控制台，以及账户、渠道和网关等核心服务管理后台；`china-models` 仅作为域名和技术兼容名称。本地/线上部署配置统一放在仓库根目录 `deploy/`。
+
+运行时仍使用 `sub2api` 作为 Go module、容器、镜像和 PostgreSQL database 名称。这些兼容性名称不对应平级源码目录；根目录不应再出现 `sub2api/` 副本。
 
 ## 项目职责
 
-- 用户控制台与管理后台
+- 用户控制台与账户、渠道、网关等核心服务管理后台
 - 账户认证、订阅、API Key、配额与统计接口
 - 订阅代充及 Codex 中转相关权益履约
 - 付费教程、Skills、workflow、Agents 的产品权益与分发配置
@@ -42,6 +44,12 @@
   - 官网/帮助内容独立维护，不再放回本仓库
 - `marketing/`
   - 营销内容独立维护，不在本仓库承载
+
+- `site-admin/` + `site-bff/`
+  - 新版商城运营后台和服务端业务层独立维护
+  - 商城订单、履约、库存、财务、FAQ/教程、支付通知和站点发布不放入本项目
+
+调用关系固定为：`site-admin -> site-bff -> console distributor API`。`site-admin` 不直接调用 `console`。
 
 ## 当前拆分后的边界
 

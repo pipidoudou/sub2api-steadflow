@@ -115,6 +115,11 @@ export const adminPaymentAPI = {
     return apiClient.post(`/admin/payment/orders/${id}/retry`)
   },
 
+  /** Record an already external/manual subscription delivery without automated fulfillment or email. */
+  markManuallyFulfilled(id: number) {
+    return apiClient.post<PaymentOrder>(`/admin/payment/orders/${id}/mark-manually-fulfilled`)
+  },
+
   /** Process a refund */
   refundOrder(id: number, data: { amount: number; reason: string; deduct_balance?: boolean; force?: boolean }) {
     return apiClient.post<RefundResult>(`/admin/payment/orders/${id}/refund`, data)

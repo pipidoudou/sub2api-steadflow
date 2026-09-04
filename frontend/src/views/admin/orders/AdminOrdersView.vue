@@ -19,7 +19,7 @@
       </div>
 
       <!-- Table -->
-      <OrderTable :orders="orders" :loading="ordersLoading" show-user>
+      <OrderTable :orders="orders" :loading="ordersLoading" :status-label-key="adminOrderStatusLabelKey" show-user>
         <template #actions="{ row }">
           <div class="flex items-center gap-1">
             <button @click="showOrderDetail(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-600">
@@ -29,6 +29,15 @@
             <button v-if="row.status === 'PENDING'" @click="handleCancelOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
               <Icon name="x" size="sm" />
               {{ t('payment.orders.cancel') }}
+            </button>
+            <button
+              v-if="canMarkManuallyFulfilled(row)"
+              :disabled="manualFulfillmentIds.has(row.id)"
+              class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-green-600 hover:bg-green-50 disabled:opacity-60 dark:text-green-400 dark:hover:bg-green-900/20"
+              @click="handleMarkManuallyFulfilled(row)"
+            >
+              <Icon name="check" size="sm" />
+              {{ t('payment.admin.markManuallyFulfilled') }}
             </button>
             <button v-if="row.status === 'FAILED'" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
               <Icon name="refresh" size="sm" />
@@ -65,7 +74,7 @@
         <div class="grid grid-cols-2 gap-4">
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</p><p class="font-mono text-sm font-medium text-gray-900 dark:text-white">#{{ selectedOrder.id }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderNo') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ selectedOrder.out_trade_no }}</p></div>
-          <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.status') }}</p><OrderStatusBadge :status="selectedOrder.status" /></div>
+          <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.status') }}</p><OrderStatusBadge :status="selectedOrder.status" :label-key="adminOrderStatusLabelKey(selectedOrder)" /></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ selectedOrder.amount.toFixed(2) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol(selectedOrder) }}{{ selectedOrder.pay_amount.toFixed(2) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.paymentMethod') }}</p><p class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.methods.' + selectedOrder.payment_type, selectedOrder.payment_type) }}</p></div>
@@ -132,6 +141,7 @@ import AdminRefundDialog from '@/components/admin/payment/AdminRefundDialog.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import OrderTable from '@/components/payment/OrderTable.vue'
 import { currencySymbol } from '@/components/payment/currency'
+import { adminOrderStatusLabelKey, canMarkManuallyFulfilled } from '@/components/admin/payment/orderAdminPresentation'
 
 interface AuditLog {
   id: number
@@ -156,6 +166,7 @@ const refundSubmitting = ref(false)
 const refundRequireForce = ref(false)
 const refundWarning = ref('')
 const refundQueryingIds = ref(new Set<number>())
+const manualFulfillmentIds = ref(new Set<number>())
 const orderAuditLogs = ref<AuditLog[]>([])
 const creditedAmountSymbol = currencySymbol('USD')
 
@@ -192,7 +203,7 @@ const statusFilterOptions = computed(() => [
   { value: 'PENDING', label: t('payment.status.pending') },
   { value: 'PAID', label: t('payment.status.paid') },
   { value: 'COMPLETED', label: t('payment.status.completed') },
-  { value: 'EXPIRED', label: t('payment.status.expired') },
+  { value: 'EXPIRED', label: t('payment.admin.paymentTimeout') },
   { value: 'CANCELLED', label: t('payment.status.cancelled') },
   { value: 'FAILED', label: t('payment.status.failed') },
   { value: 'REFUNDED', label: t('payment.status.refunded') },
@@ -235,6 +246,26 @@ async function handleCancelOrder(order: PaymentOrder) {
 async function handleRetryOrder(order: PaymentOrder) {
   try { await adminPaymentAPI.retryRecharge(order.id); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
+}
+
+async function handleMarkManuallyFulfilled(order: PaymentOrder) {
+  if (!window.confirm(t('payment.admin.markManuallyFulfilledConfirm'))) return
+  manualFulfillmentIds.value = new Set(manualFulfillmentIds.value).add(order.id)
+  try {
+    await adminPaymentAPI.markManuallyFulfilled(order.id)
+    appStore.showSuccess(t('payment.admin.markManuallyFulfilledSuccess'))
+    await loadOrders()
+    if (selectedOrder.value?.id === order.id) {
+      await showOrderDetail(order)
+    }
+  } catch (err: unknown) {
+    appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
+    await loadOrders()
+  } finally {
+    const next = new Set(manualFulfillmentIds.value)
+    next.delete(order.id)
+    manualFulfillmentIds.value = next
+  }
 }
 
 function openRefundDialog(order: PaymentOrder) {

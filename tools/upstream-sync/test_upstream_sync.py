@@ -2550,6 +2550,14 @@ class UpgradeReportTests(unittest.TestCase):
 
         self.assertEqual(redact_report_secrets(identifier), identifier)
 
+    def test_redactor_preserves_ipv6_brackets_and_is_idempotent(self):
+        value = "socks5://user:pass@[2001:db8::1]:1080"
+
+        redacted = redact_report_secrets(value)
+
+        self.assertEqual(redacted, "socks5://<redacted>@[2001:db8::1]:1080")
+        self.assertEqual(redact_report_secrets(redacted), redacted)
+
     def test_reports_reject_unknown_status_and_sort_object_lists_by_stable_key(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "report status"):

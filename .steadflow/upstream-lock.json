@@ -1,8 +1,8 @@
 {
-  "peeled_commit": "e0c48a19ed794a565e3858662520afe0a1f9f0ba",
-  "release": "v0.1.178",
+  "peeled_commit": "aa236488351eb71e120fc2b6fb32e36b0374c918",
+  "release": "v0.2.0",
   "remote": "upstream",
   "repository": "https://github.com/Wei-Shaw/sub2api.git",
   "schema_version": 1,
-  "tree": "6fec3cdac4299b6114d8c7da271401a3cf329be7"
+  "tree": "a1cfb86e47fd4dfdb0b85bfa51394f30785073fc"
 }

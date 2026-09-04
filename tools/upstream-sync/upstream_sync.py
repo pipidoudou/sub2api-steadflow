@@ -34,6 +34,7 @@ MANIFEST_TOP_LEVEL_KEYS = frozenset(
     )
 )
 MIGRATION_BASELINE_KEYS = frozenset(("schema_version", "algorithm", "migrations"))
+MIGRATION_BASELINE_OPTIONAL_KEYS = frozenset(("reviewed_additions",))
 UPSTREAM_LOCK_KEYS = frozenset(
     ("schema_version", "remote", "repository", "release", "peeled_commit", "tree")
 )
@@ -535,9 +536,12 @@ def migration_checksums(root):
 def audit_migrations(root, baseline):
     """Compare current migrations with a checksum baseline."""
     actual_keys = set(baseline)
-    if actual_keys != MIGRATION_BASELINE_KEYS:
+    allowed_keys = MIGRATION_BASELINE_KEYS | MIGRATION_BASELINE_OPTIONAL_KEYS
+    if not MIGRATION_BASELINE_KEYS.issubset(actual_keys) or not actual_keys.issubset(
+        allowed_keys
+    ):
         missing = ",".join(sorted(MIGRATION_BASELINE_KEYS - actual_keys)) or "none"
-        extra = ",".join(sorted(actual_keys - MIGRATION_BASELINE_KEYS)) or "none"
+        extra = ",".join(sorted(actual_keys - allowed_keys)) or "none"
         raise MigrationValidationError(
             f"migration baseline keys missing={missing} extra={extra}"
         )
@@ -583,6 +587,30 @@ def audit_migrations(root, baseline):
             raise MigrationValidationError(
                 f"invalid sha256 for migration: {path}"
             )
+    reviewed = baseline.get("reviewed_additions", {})
+    if not isinstance(reviewed, dict) or list(reviewed) != sorted(reviewed):
+        raise MigrationValidationError(
+            "migration reviewed_additions must be a sorted object"
+        )
+    for path, review in reviewed.items():
+        _validate_repo_paths("migration reviewed_additions", [path])
+        if not path.startswith("backend/migrations/") or not path.endswith(".sql"):
+            raise MigrationValidationError(
+                f"invalid reviewed migration path: {path}"
+            )
+        if (
+            not isinstance(review, dict)
+            or set(review) != {"rationale", "sha256"}
+            or not isinstance(review["rationale"], str)
+            or not review["rationale"].strip()
+        ):
+            raise MigrationValidationError(
+                f"invalid reviewed migration record: {path}"
+            )
+        try:
+            _require_sha256(review["sha256"], f"reviewed migration {path}")
+        except ValueError as error:
+            raise MigrationValidationError(str(error)) from error
     current_content = _migration_inventory(root)
     current = {
         path: hashlib.sha256(content).hexdigest()
@@ -601,6 +629,15 @@ def audit_migrations(root, baseline):
     deleted = sorted(set(historical) - set(current))
     added = sorted(set(current) - set(historical))
     added_risk = {path: classify_migration_sql(current_content[path]) for path in added}
+    for path in added:
+        review = reviewed.get(path)
+        checksum = current[path]
+        if (
+            added_risk[path] == "destructive"
+            and review is not None
+            and review["sha256"] == checksum
+        ):
+            added_risk[path] = "reviewed-destructive"
     return {
         "unchanged": unchanged,
         "changed": changed,
@@ -2513,6 +2550,14 @@ def _advanced_baseline_documents(
 
     migrations = dict(source_documents["migrations"])
     migrations["migrations"] = migration_checksums(worktree)
+    if "reviewed_additions" in migrations:
+        migrations["reviewed_additions"] = {
+            path: review
+            for path, review in migrations["reviewed_additions"].items()
+            if path not in migrations["migrations"]
+        }
+        if not migrations["reviewed_additions"]:
+            migrations.pop("reviewed_additions")
     validate_migrations(worktree, migrations)
     manifest = _reconciled_manifest(
         repository, state, worktree, source_documents["customization"]
@@ -3119,7 +3164,7 @@ def _validate_success_report(report, state, worktree):
         or not isinstance(migrations["added_risk"], dict)
         or set(migrations["added_risk"]) != set(migrations["added"])
         or any(
-            risk not in {"additive", "review-required"}
+            risk not in {"additive", "review-required", "reviewed-destructive"}
             for risk in migrations["added_risk"].values()
         )
     ):

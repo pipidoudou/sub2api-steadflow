@@ -1576,7 +1576,10 @@ class RepositoryBaselineTests(unittest.TestCase):
         baseline = self.load_deterministic_json(
             ".steadflow/migration-checksums.json"
         )
-        self.assertEqual(set(baseline), {"algorithm", "migrations", "schema_version"})
+        self.assertEqual(
+            set(baseline),
+            {"algorithm", "migrations", "reviewed_additions", "schema_version"},
+        )
         self.assertEqual(baseline["schema_version"], 1)
         self.assertEqual(baseline["algorithm"], "sha256")
         independently_hashed = {
@@ -1589,6 +1592,12 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertEqual(baseline["migrations"], independently_hashed)
         self.assertEqual(baseline["migrations"], migration_checksums(REPO_ROOT))
         self.assertEqual(len(baseline["migrations"]), 268)
+        self.assertEqual(
+            baseline["reviewed_additions"]
+            ["backend/migrations/227_composite_routes_add_cn_providers.sql"]
+            ["sha256"],
+            "21d81a064828e8a544992f98e949053e45e9a135bc011f129147675d94612ddf",
+        )
         report = validate_migrations(REPO_ROOT, baseline)
         self.assertEqual(len(report["unchanged"]), 268)
         self.assertEqual(report["changed"], [])
@@ -2079,6 +2088,54 @@ class MigrationRiskGateTests(unittest.TestCase):
             baseline = {
                 "algorithm": "sha256",
                 "migrations": {},
+                "schema_version": 1,
+            }
+
+            with self.assertRaisesRegex(
+                MigrationValidationError, "destructive new migrations"
+            ):
+                validate_migrations(root, baseline)
+
+    def test_exact_reviewed_destructive_migration_is_auditable_and_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            migrations = root / "backend" / "migrations"
+            migrations.mkdir(parents=True)
+            content = (
+                b"ALTER TABLE routes DROP CONSTRAINT IF EXISTS routes_check;\n"
+                b"ALTER TABLE routes ADD CONSTRAINT routes_check CHECK (kind IN ('a', 'b'));\n"
+            )
+            path = "backend/migrations/002_expand_check.sql"
+            (root / path).write_bytes(content)
+            baseline = {
+                "algorithm": "sha256",
+                "migrations": {},
+                "reviewed_additions": {
+                    path: {
+                        "rationale": "Replaces the same CHECK constraint with an expanded allowlist.",
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                    }
+                },
+                "schema_version": 1,
+            }
+
+            report = validate_migrations(root, baseline)
+
+        self.assertEqual(report["added_risk"], {path: "reviewed-destructive"})
+
+    def test_reviewed_destructive_migration_requires_exact_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            migrations = root / "backend" / "migrations"
+            migrations.mkdir(parents=True)
+            path = "backend/migrations/002_drop.sql"
+            (root / path).write_text("DROP TABLE users;\n", encoding="utf-8")
+            baseline = {
+                "algorithm": "sha256",
+                "migrations": {},
+                "reviewed_additions": {
+                    path: {"rationale": "reviewed", "sha256": "0" * 64}
+                },
                 "schema_version": 1,
             }
 

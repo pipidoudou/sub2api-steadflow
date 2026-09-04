@@ -553,6 +553,8 @@
       "assets/partners/logos/veilx.png",
       "backend/cmd/server/VERSION",
       "backend/cmd/server/wire_gen.go",
+      "backend/go.mod",
+      "backend/go.sum",
       "backend/internal/handler/admin/payment_handler.go",
       "backend/internal/handler/handler.go",
       "backend/internal/handler/wire.go",

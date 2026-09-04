@@ -1231,8 +1231,8 @@ class RepositoryBaselineTests(unittest.TestCase):
                 "464bd23f4c2b3b976dff7caab98d38fd05e21914df193e9921e356cae184235c",
             ),
             "integration_adapter": (
-                418,
-                "ff0e97500de6959ea414280ea13fd0d66282320201dd41da9307ae1f312d56e8",
+                420,
+                "e506b58274c02a2622402b9aba2025b7d8320643cc323989b195aff0216302b7",
             ),
         }
         for layer in OWNER_LAYER_KEYS:
@@ -1245,8 +1245,8 @@ class RepositoryBaselineTests(unittest.TestCase):
         certified_paths = [
             path for layer in OWNER_LAYER_KEYS for path in manifest[layer]["paths"]
         ]
-        self.assertEqual(len(certified_paths), 519)
-        self.assertEqual(len(set(certified_paths)), 519)
+        self.assertEqual(len(certified_paths), 521)
+        self.assertEqual(len(set(certified_paths)), 521)
         report = validate_manifest(manifest, certified_paths)
         self.assertEqual(report["owned"], sorted(certified_paths))
 

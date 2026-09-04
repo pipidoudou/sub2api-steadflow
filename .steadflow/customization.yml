@@ -610,6 +610,7 @@
       "frontend/src/api/__tests__/admin.payment.manualFulfillment.spec.ts",
       "frontend/src/api/admin/payment.ts",
       "frontend/src/components/account/CreateAccountModal.vue",
+      "frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts",
       "frontend/src/components/account/__tests__/credentialsBuilder.spec.ts",
       "frontend/src/components/admin/payment/__tests__/orderAdminPresentation.spec.ts",
       "frontend/src/components/admin/payment/orderAdminPresentation.ts",
@@ -703,7 +704,8 @@
       "frontend/src/utils/publicSetupRoute.ts",
       "frontend/src/views/auth/RegisterView.vue",
       "frontend/src/views/public/ThesisLandingView.vue",
-      "frontend/src/views/user/PaymentView.vue"
+      "frontend/src/views/user/PaymentView.vue",
+      "frontend/src/views/user/__tests__/PaymentView.spec.ts"
     ]
   }
 }

@@ -277,7 +277,7 @@ async function mountSubscriptionPlanList(planCount: number) {
   return wrapper
 }
 
-describe('PaymentView subscription plan grid', () => {
+describe('PaymentView default subscription plan grid', () => {
   it.each([3, 4, 6])('keeps %i plans on the existing mobile/tablet/desktop grid', async (planCount) => {
     const wrapper = await mountSubscriptionPlanList(planCount)
     const cards = wrapper.findAllComponents(SubscriptionPlanCard)

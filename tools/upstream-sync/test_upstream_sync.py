@@ -4460,9 +4460,10 @@ class UpgradeConflictContinueTests(unittest.TestCase):
 
     def test_continue_recovers_conflicted_candidate_after_baseline_commit(self):
         worktree = self.start_conflict()
-        (worktree / "shared.txt").write_text(
-            "resolved by fixture\n", encoding="utf-8"
-        )
+        upstream_resolution = self.fixture.run_git(
+            "show", f"{self.target_commit}:shared.txt", root=worktree
+        ).stdout
+        (worktree / "shared.txt").write_text(upstream_resolution, encoding="utf-8")
         self.fixture.run_git("add", "shared.txt", root=worktree)
         repository = self.fixture.repository()
 

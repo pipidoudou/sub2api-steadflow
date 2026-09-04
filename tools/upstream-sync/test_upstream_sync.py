@@ -1214,28 +1214,57 @@ class RepositoryBaselineTests(unittest.TestCase):
 
     def test_customization_manifest_matches_certified_inventory_and_tooling_delta(self):
         manifest = self.load_deterministic_json(".steadflow/customization.yml")
-        expected_zlists = {
-            "data": (
-                2,
-                "8ba3da990f920c645f8c15269674563784f557c28079996c42cc464e8939ab83",
-            ),
-            "distributor": (
-                45,
-                "93627aae8c3994c8c4c1f47b1c5c3857dfeca64deb0268d2abf1b4e1695aee8b",
-            ),
-            "branding_settings": (
-                28,
-                "d8b17dec7473331bb561d72a9e492b7ff5705eab1abcd5ce7e2b20db428acf00",
-            ),
-            "thesis_public": (
-                26,
-                "464bd23f4c2b3b976dff7caab98d38fd05e21914df193e9921e356cae184235c",
-            ),
-            "integration_adapter": (
-                422,
-                "24aa0bec5a2c36dffff345e089ac0f162b4e3855d03e78263e8b81ea30292188",
-            ),
+        release = self.load_deterministic_json(".steadflow/upstream-lock.json")[
+            "release"
+        ]
+        expected_zlists_by_release = {
+            "v0.1.178": {
+                "data": (
+                    2,
+                    "8ba3da990f920c645f8c15269674563784f557c28079996c42cc464e8939ab83",
+                ),
+                "distributor": (
+                    45,
+                    "93627aae8c3994c8c4c1f47b1c5c3857dfeca64deb0268d2abf1b4e1695aee8b",
+                ),
+                "branding_settings": (
+                    28,
+                    "d8b17dec7473331bb561d72a9e492b7ff5705eab1abcd5ce7e2b20db428acf00",
+                ),
+                "thesis_public": (
+                    27,
+                    "5f1c8d806c6fe2eee91e9e082c575b21e5eab0edccd5369cfb653a7dfdecd11a",
+                ),
+                "integration_adapter": (
+                    423,
+                    "c27fd45192c0f3f777de02b959c7610c2feed529bfb71e0e8b8fcb1e8098943b",
+                ),
+            },
+            "v0.2.0": {
+                "data": (
+                    2,
+                    "8ba3da990f920c645f8c15269674563784f557c28079996c42cc464e8939ab83",
+                ),
+                "distributor": (
+                    45,
+                    "93627aae8c3994c8c4c1f47b1c5c3857dfeca64deb0268d2abf1b4e1695aee8b",
+                ),
+                "branding_settings": (
+                    28,
+                    "d8b17dec7473331bb561d72a9e492b7ff5705eab1abcd5ce7e2b20db428acf00",
+                ),
+                "thesis_public": (
+                    27,
+                    "5f1c8d806c6fe2eee91e9e082c575b21e5eab0edccd5369cfb653a7dfdecd11a",
+                ),
+                "integration_adapter": (
+                    420,
+                    "8d4acc6528ac0a6af002d8c67a8d4abcb3a3eeb82b5f47473445237c878da532",
+                ),
+            },
         }
+        self.assertIn(release, expected_zlists_by_release)
+        expected_zlists = expected_zlists_by_release[release]
         for layer in OWNER_LAYER_KEYS:
             paths = manifest[layer]["paths"]
             expected_count, expected_digest = expected_zlists[layer]
@@ -1246,14 +1275,13 @@ class RepositoryBaselineTests(unittest.TestCase):
         certified_paths = [
             path for layer in OWNER_LAYER_KEYS for path in manifest[layer]["paths"]
         ]
-        self.assertEqual(len(certified_paths), 523)
-        self.assertEqual(len(set(certified_paths)), 523)
+        expected_total = {"v0.1.178": 525, "v0.2.0": 522}[release]
+        self.assertEqual(len(certified_paths), expected_total)
+        self.assertEqual(len(set(certified_paths)), expected_total)
         report = validate_manifest(manifest, certified_paths)
         self.assertEqual(report["owned"], sorted(certified_paths))
 
-        self.assertEqual(
-            manifest["shared_seams"],
-            [
+        common_shared_seams = [
                 ".github/audit-exceptions.yml",
                 ".github/workflows/backend-ci.yml",
                 ".github/workflows/release.yml",
@@ -1263,10 +1291,8 @@ class RepositoryBaselineTests(unittest.TestCase):
                 "README.md",
                 "README_CN.md",
                 "README_JA.md",
-                "backend/cmd/server/VERSION",
                 "backend/cmd/server/wire_gen.go",
                 "backend/ent/group.go",
-                "backend/ent/schema/group.go",
                 "backend/go.sum",
                 "backend/internal/handler/handler.go",
                 "backend/internal/handler/wire.go",
@@ -1283,9 +1309,15 @@ class RepositoryBaselineTests(unittest.TestCase):
                 "deploy/docker-compose.standalone.yml",
                 "deploy/docker-compose.yml",
                 "docs/COMPOSITE_GROUPS.md",
+                "frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts",
                 "frontend/src/router/index.ts",
-            ],
-        )
+        ]
+        if release == "v0.1.178":
+            common_shared_seams.extend(
+                ["backend/cmd/server/VERSION", "backend/ent/schema/group.go"]
+            )
+            common_shared_seams.sort()
+        self.assertEqual(manifest["shared_seams"], common_shared_seams)
         generated_from_tree = []
         for relative in certified_paths:
             path = REPO_ROOT / relative
@@ -1547,21 +1579,28 @@ class RepositoryBaselineTests(unittest.TestCase):
 
     def assert_upstream_lock_matches_git_objects(self, root):
         lock = self.load_deterministic_json(".steadflow/upstream-lock.json", root)
+        expected_by_release = {
+            "v0.1.178": {
+                "peeled_commit": "e0c48a19ed794a565e3858662520afe0a1f9f0ba",
+                "tree": "6fec3cdac4299b6114d8c7da271401a3cf329be7",
+            },
+            "v0.2.0": {
+                "peeled_commit": "aa236488351eb71e120fc2b6fb32e36b0374c918",
+                "tree": "a1cfb86e47fd4dfdb0b85bfa51394f30785073fc",
+            },
+        }
+        self.assertIn(lock["release"], expected_by_release)
         expected = {
-            "peeled_commit": "e0c48a19ed794a565e3858662520afe0a1f9f0ba",
-            "release": "v0.1.178",
+            **expected_by_release[lock["release"]],
+            "release": lock["release"],
             "remote": "upstream",
             "repository": "https://github.com/Wei-Shaw/sub2api.git",
             "schema_version": 1,
-            "tree": "6fec3cdac4299b6114d8c7da271401a3cf329be7",
         }
         self.assertEqual(lock, expected)
+        self.git("cat-file", "-e", f'{lock["peeled_commit"]}^{{commit}}', root=root)
         self.assertEqual(
-            self.git("rev-parse", "refs/tags/v0.1.178^{commit}", root=root),
-            lock["peeled_commit"],
-        )
-        self.assertEqual(
-            self.git("rev-parse", "refs/tags/v0.1.178^{tree}", root=root),
+            self.git("rev-parse", f'{lock["peeled_commit"]}^{{tree}}', root=root),
             lock["tree"],
         )
 
@@ -1577,9 +1616,13 @@ class RepositoryBaselineTests(unittest.TestCase):
         baseline = self.load_deterministic_json(
             ".steadflow/migration-checksums.json"
         )
+        release = self.load_deterministic_json(".steadflow/upstream-lock.json")[
+            "release"
+        ]
         self.assertEqual(
             set(baseline),
-            {"algorithm", "migrations", "reviewed_additions", "schema_version"},
+            {"algorithm", "migrations", "schema_version"}
+            | ({"reviewed_additions"} if release == "v0.1.178" else set()),
         )
         self.assertEqual(baseline["schema_version"], 1)
         self.assertEqual(baseline["algorithm"], "sha256")
@@ -1592,21 +1635,26 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertEqual(list(baseline["migrations"]), sorted(baseline["migrations"]))
         self.assertEqual(baseline["migrations"], independently_hashed)
         self.assertEqual(baseline["migrations"], migration_checksums(REPO_ROOT))
-        self.assertEqual(len(baseline["migrations"]), 268)
-        self.assertEqual(
-            baseline["reviewed_additions"]
-            ["backend/migrations/227_composite_routes_add_cn_providers.sql"]
-            ["sha256"],
-            "21d81a064828e8a544992f98e949053e45e9a135bc011f129147675d94612ddf",
-        )
+        expected_count = {"v0.1.178": 268, "v0.2.0": 280}[release]
+        self.assertEqual(len(baseline["migrations"]), expected_count)
+        if release == "v0.1.178":
+            self.assertEqual(
+                baseline["reviewed_additions"]
+                ["backend/migrations/227_composite_routes_add_cn_providers.sql"]
+                ["sha256"],
+                "21d81a064828e8a544992f98e949053e45e9a135bc011f129147675d94612ddf",
+            )
         report = validate_migrations(REPO_ROOT, baseline)
-        self.assertEqual(len(report["unchanged"]), 268)
+        self.assertEqual(len(report["unchanged"]), expected_count)
         self.assertEqual(report["changed"], [])
         self.assertEqual(report["deleted"], [])
         self.assertEqual(report["added"], [])
 
     def test_certified_known_failure_baseline_records_zero_without_overclaiming(self):
         document = self.load_deterministic_json(".steadflow/known-failures.yml")
+        release = self.load_deterministic_json(".steadflow/upstream-lock.json")[
+            "release"
+        ]
 
         self.assertEqual(validate_known_failures(document), document)
         self.assertEqual(document["entries"], [])
@@ -1614,9 +1662,8 @@ class RepositoryBaselineTests(unittest.TestCase):
             document["baseline"]["result"],
             {"failed": 0, "go_failed": 0, "vitest_failed": 0},
         )
-        self.assertEqual(
-            document["baseline"]["evidence"],
-            {
+        expected_evidence = {
+            "v0.1.178": {
                 "go_json_sha256": (
                     "9889e37c20a29ad4c462ee59cd086260e5b4e40c373bea14386961325d251406"
                 ),
@@ -1624,11 +1671,28 @@ class RepositoryBaselineTests(unittest.TestCase):
                     "a71c183c8d8ee42024b15fce7bac2f85bf9eba0e8acde6abb759b2f7d5c7aaba"
                 ),
             },
+            "v0.2.0": {
+                "go_json_sha256": (
+                    "3516dc134a68528dfe25aa70f82ae66185fa703132b079ba57234e349d65167e"
+                ),
+                "vitest_json_sha256": (
+                    "60ada5a20237165bf934eb674715a1f62844670c3a1a692698712a8bb81ef9b7"
+                ),
+            },
+        }
+        self.assertEqual(document["baseline"]["release"], release)
+        self.assertEqual(document["baseline"]["evidence"], expected_evidence[release])
+        self.assertTrue(
+            all(release in command for command in document["baseline"]["commands"])
         )
         note = document["baseline"]["historical_observation"]
-        self.assertIn("12", note)
-        self.assertIn("not reproducible", note)
-        self.assertIn("does not prove", note)
+        if release == "v0.1.178":
+            self.assertIn("12", note)
+            self.assertIn("not reproducible", note)
+            self.assertIn("does not prove", note)
+        else:
+            self.assertIn("Certified v0.2.0 full Go and Vitest run", note)
+            self.assertIn("exact allowed failures", note)
 
     def test_makefile_exposes_single_critical_gate_entrypoint(self):
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")

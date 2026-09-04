@@ -119,6 +119,7 @@ sys.path.insert(0, str(MODULE_DIR))
 
 from upstream_sync import (
     _git_change_summary,
+    _success_report_digest,
     _summary_paths,
     audit_migrations,
     compare_test_failures,
@@ -4205,6 +4206,37 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
             + "\n```\n"
         ).encode("utf-8")
         self.assertEqual(markdown_path.read_bytes(), expected_markdown)
+
+    def test_success_report_digest_binds_redacted_test_ids(self):
+        repository = self.fixture.repository()
+        base_runner = self.fixture.validation_runner
+
+        def secret_test_id_runner(argv, **kwargs):
+            if list(argv) == ["go", "test", "-json", "./..."]:
+                output = "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "Action": "pass",
+                                "Package": "fixture/pkg",
+                                "Test": "TestFixture/https://example.test/?token=hunter2",
+                            }
+                        ),
+                        json.dumps({"Action": "pass", "Package": "fixture/pkg"}),
+                    ]
+                ) + "\n"
+                return subprocess.CompletedProcess(argv, 0, stdout=output, stderr="")
+            return base_runner(argv, **kwargs)
+
+        repository.validation_runner = secret_test_id_runner
+        create_upgrade_candidate(repository, self.release)
+
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        self.assertNotIn("hunter2", json.dumps(report, sort_keys=True))
+        self.assertIn("?<redacted>", report["full_go"]["passed"][0])
+        self.assertEqual(
+            report["validation_summary_sha256"], _success_report_digest(report)
+        )
 
     def test_forged_five_field_report_commit_without_pending_reruns_validation(self):
         repository = self.fixture.repository()

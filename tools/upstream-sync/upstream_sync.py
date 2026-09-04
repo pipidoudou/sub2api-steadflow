@@ -3451,6 +3451,7 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
         "upstream_tree": audit_context["upstream_tree"],
         "validation_summary_sha256": "",
     }
+    success = redact_report_secrets(success)
     success["validation_summary_sha256"] = _success_report_digest(success)
     return _validate_success_report(success, state, worktree)
 

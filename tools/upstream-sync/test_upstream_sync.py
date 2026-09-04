@@ -2541,6 +2541,14 @@ class UpgradeReportTests(unittest.TestCase):
         ):
             self.assertIn(diagnostic, redacted)
 
+    def test_redactor_preserves_safe_url_spelling_in_stable_test_ids(self):
+        identifier = (
+            "go:example.test/proxy:TestCase/"
+            "HTTP://PROXY.example.com:8080"
+        )
+
+        self.assertEqual(redact_report_secrets(identifier), identifier)
+
     def test_reports_reject_unknown_status_and_sort_object_lists_by_stable_key(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "report status"):

@@ -65,6 +65,13 @@ def _redact_diagnostic(value):
             parsed = urllib.parse.urlsplit(candidate)
         except ValueError:
             return "<redacted-url>"
+        if (
+            parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return candidate
         hostname = parsed.hostname or "<redacted-host>"
         try:
             port = f":{parsed.port}" if parsed.port is not None else ""

@@ -995,7 +995,7 @@ def _sort_report_lists(value):
     if isinstance(value, list):
         converted = [_sort_report_lists(item) for item in value]
         if all(isinstance(item, str) for item in converted):
-            return sorted(converted)
+            return sorted(set(converted))
         if converted and all(isinstance(item, dict) for item in converted):
             for stable_key in ("id", "path", "name", "test"):
                 if all(stable_key in item for item in converted):
@@ -3451,7 +3451,7 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
         "upstream_tree": audit_context["upstream_tree"],
         "validation_summary_sha256": "",
     }
-    success = redact_report_secrets(success)
+    success = _sort_report_lists(redact_report_secrets(success))
     success["validation_summary_sha256"] = _success_report_digest(success)
     return _validate_success_report(success, state, worktree)
 

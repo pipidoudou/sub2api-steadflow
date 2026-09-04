@@ -3648,21 +3648,25 @@ def _require_recorded_conflicts(repository, state, worktree):
     )["customization"]
     if conflicts["customization_sha256"] != source_customization_sha256:
         raise UpgradeBlocked("upgrade state conflict configuration binding is invalid")
+    source_manifest = _source_configuration_documents(
+        repository, state, worktree
+    )["customization"]
     paths = _configuration_paths(GitRepository(worktree))
     if _raw_sha256(paths["customization"]) != conflicts["customization_sha256"]:
         if state["phase"] != "validating":
             raise UpgradeBlocked("customization changed after merge conflict capture")
         _validate_advanced_baseline(repository, state, worktree)
-    manifest = load_json_document(paths["customization"])
     validate_manifest(
-        manifest,
+        source_manifest,
         [
             path
             for layer in OWNER_LAYER_KEYS
-            for path in manifest[layer]["paths"]
+            for path in source_manifest[layer]["paths"]
         ],
     )
-    unregistered = sorted(set(conflicts["paths"]) - set(manifest["shared_seams"]))
+    unregistered = sorted(
+        set(conflicts["paths"]) - set(source_manifest["shared_seams"])
+    )
     if unregistered:
         raise UpgradeBlocked(
             "unregistered conflict paths: " + ", ".join(unregistered)

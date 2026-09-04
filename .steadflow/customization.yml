@@ -675,6 +675,7 @@
     "deploy/docker-compose.standalone.yml",
     "deploy/docker-compose.yml",
     "docs/COMPOSITE_GROUPS.md",
+    "frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts",
     "frontend/src/router/index.ts"
   ],
   "thesis_public": {

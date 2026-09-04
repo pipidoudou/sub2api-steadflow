@@ -3650,7 +3650,9 @@ def _require_recorded_conflicts(repository, state, worktree):
         raise UpgradeBlocked("upgrade state conflict configuration binding is invalid")
     paths = _configuration_paths(GitRepository(worktree))
     if _raw_sha256(paths["customization"]) != conflicts["customization_sha256"]:
-        raise UpgradeBlocked("customization changed after merge conflict capture")
+        if state["phase"] != "validating":
+            raise UpgradeBlocked("customization changed after merge conflict capture")
+        _validate_advanced_baseline(repository, state, worktree)
     manifest = load_json_document(paths["customization"])
     validate_manifest(
         manifest,

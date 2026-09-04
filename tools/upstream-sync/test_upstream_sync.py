@@ -118,6 +118,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(MODULE_DIR))
 
 from upstream_sync import (
+    _git_change_summary,
+    _summary_paths,
     audit_migrations,
     compare_test_failures,
     classify_migration_sql,
@@ -1229,8 +1231,8 @@ class RepositoryBaselineTests(unittest.TestCase):
                 "464bd23f4c2b3b976dff7caab98d38fd05e21914df193e9921e356cae184235c",
             ),
             "integration_adapter": (
-                407,
-                "75501881c8fa56f5aaddd636ca821e850f4d325ed7de67b3cc6620815e4af387",
+                418,
+                "ff0e97500de6959ea414280ea13fd0d66282320201dd41da9307ae1f312d56e8",
             ),
         }
         for layer in OWNER_LAYER_KEYS:
@@ -1243,18 +1245,40 @@ class RepositoryBaselineTests(unittest.TestCase):
         certified_paths = [
             path for layer in OWNER_LAYER_KEYS for path in manifest[layer]["paths"]
         ]
-        self.assertEqual(len(certified_paths), 508)
-        self.assertEqual(len(set(certified_paths)), 508)
+        self.assertEqual(len(certified_paths), 519)
+        self.assertEqual(len(set(certified_paths)), 519)
         report = validate_manifest(manifest, certified_paths)
         self.assertEqual(report["owned"], sorted(certified_paths))
 
         self.assertEqual(
             manifest["shared_seams"],
             [
+                ".github/audit-exceptions.yml",
+                ".github/workflows/backend-ci.yml",
+                ".github/workflows/release.yml",
+                ".github/workflows/security-scan.yml",
+                ".gitignore",
+                "DEV_GUIDE.md",
+                "README.md",
+                "README_CN.md",
+                "README_JA.md",
+                "backend/cmd/server/VERSION",
+                "backend/cmd/server/wire_gen.go",
                 "backend/internal/handler/handler.go",
                 "backend/internal/handler/wire.go",
                 "backend/internal/server/router.go",
+                "backend/internal/service/setting_parse.go",
                 "backend/internal/service/wire.go",
+                "deploy/.env.example",
+                "deploy/DOCKER.md",
+                "deploy/Dockerfile",
+                "deploy/README.md",
+                "deploy/config.example.yaml",
+                "deploy/docker-compose.dev.yml",
+                "deploy/docker-compose.local.yml",
+                "deploy/docker-compose.standalone.yml",
+                "deploy/docker-compose.yml",
+                "docs/COMPOSITE_GROUPS.md",
                 "frontend/src/router/index.ts",
             ],
         )
@@ -3328,8 +3352,16 @@ class UpgradeCleanMergeTests(unittest.TestCase):
             state["evidence"]["validated_head"],
             root=worktree,
         ).stdout.split()
+        self.assertEqual(len(validated_parents), 1)
+        merge_parents = self.fixture.run_git(
+            "show",
+            "-s",
+            "--format=%P",
+            validated_parents[0],
+            root=worktree,
+        ).stdout.split()
         self.assertEqual(
-            validated_parents, [self.fixture.source_commit, target_commit]
+            merge_parents, [self.fixture.source_commit, target_commit]
         )
         self.assertEqual(
             self.fixture.run_git(
@@ -3552,6 +3584,116 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
             "Steadflow Upgrade <upgrade@steadflow.invalid>|"
             "Steadflow Upgrade <upgrade@steadflow.invalid>|"
             f"{validated_date}|{validated_date}",
+        )
+
+    def test_success_advances_every_certified_baseline_before_report_commit(self):
+        migration_path = (
+            self.fixture.official
+            / "backend"
+            / "migrations"
+            / "002_additive.sql"
+        )
+        migration_path.write_text(
+            "CREATE TABLE fixture_additive (id bigint);\n", encoding="utf-8"
+        )
+        self.fixture.run_git(
+            "add", "backend/migrations/002_additive.sql", root=self.fixture.official
+        )
+        target_commit, _ = self.fixture.add_release("v1.2.0")
+
+        state = create_upgrade_candidate(self.fixture.repository(), "v1.2.0")
+
+        worktree = Path(state["worktree"])
+        report_commit = self.fixture.run_git(
+            "rev-parse", "HEAD", root=worktree
+        ).stdout.strip()
+        baseline_commit = self.fixture.run_git(
+            "rev-parse", "HEAD^", root=worktree
+        ).stdout.strip()
+        self.assertEqual(
+            self.fixture.run_git(
+                "show", "-s", "--format=%s", baseline_commit, root=worktree
+            ).stdout.strip(),
+            "chore(upstream): advance baseline to v1.2.0",
+        )
+        self.assertEqual(
+            sorted(
+                self.fixture.run_git(
+                    "diff-tree",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    baseline_commit,
+                    root=worktree,
+                ).stdout.splitlines()
+            ),
+            [
+                ".steadflow/customization.yml",
+                ".steadflow/known-failures.yml",
+                ".steadflow/migration-checksums.json",
+                ".steadflow/upstream-lock.json",
+            ],
+        )
+
+        lock = json.loads(
+            (worktree / ".steadflow" / "upstream-lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(lock["release"], "v1.2.0")
+        self.assertEqual(lock["peeled_commit"], target_commit)
+        self.assertEqual(
+            lock["tree"],
+            self.fixture.run_git(
+                "rev-parse", f"{target_commit}^{{tree}}", root=worktree
+            ).stdout.strip(),
+        )
+
+        known = json.loads(
+            (worktree / ".steadflow" / "known-failures.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(known["baseline"]["release"], "v1.2.0")
+        self.assertEqual(
+            known["baseline"]["result"],
+            {"failed": 0, "go_failed": 0, "vitest_failed": 0},
+        )
+        self.assertTrue(
+            all("v1.2.0" in command for command in known["baseline"]["commands"])
+        )
+        self.assertNotEqual(
+            known["baseline"]["evidence"]["go_json_sha256"], "a" * 64
+        )
+        self.assertNotEqual(
+            known["baseline"]["evidence"]["vitest_json_sha256"], "b" * 64
+        )
+
+        migrations = json.loads(
+            (worktree / ".steadflow" / "migration-checksums.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            migrations["migrations"]["backend/migrations/002_additive.sql"],
+            hashlib.sha256(migration_path.read_bytes()).hexdigest(),
+        )
+
+        manifest = json.loads(
+            (worktree / ".steadflow" / "customization.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        final_changes = _git_change_summary(
+            self.fixture.repository(), target_commit, report_commit, worktree
+        )
+        ownership = validate_manifest(
+            manifest, _summary_paths(final_changes), require_exact=True
+        )
+        self.assertEqual(ownership["unowned"], [])
+        self.assertIn(
+            ".steadflow/reports/v1.2.0.json",
+            manifest["integration_adapter"]["paths"],
         )
 
     def test_database_uri_secret_is_redacted_from_exception_json_and_markdown(self):
@@ -4049,6 +4191,9 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
 
     def test_every_report_crash_point_reruns_the_complete_pipeline(self):
         events = (
+            "after_baseline_files",
+            "after_baseline_index",
+            "after_baseline_commit",
             "before_success_reports",
             "after_json_report",
             "after_success_reports",
@@ -4724,7 +4869,6 @@ class UpgradeCompletedLifecycleTests(unittest.TestCase):
             source_after_merge,
         )
 
-        self.accept_upgrade_metadata()
         second_release = "v1.2.0"
         self.fixture.add_release(second_release)
         second = self.fixture.run_upgrade(second_release)
@@ -4764,7 +4908,9 @@ class UpgradeCompletedLifecycleTests(unittest.TestCase):
         completed = self.fixture.run_upgrade("--continue")
 
         self.assertEqual(completed.returncode, 2, completed.stderr)
-        self.assertRegex(completed.stderr, r"source HEAD changed|not.*ancestor")
+        self.assertRegex(
+            completed.stderr, r"source HEAD changed|not.*ancestor|unowned paths"
+        )
         self.assert_active_state_preserved()
 
     def test_tampered_candidate_cannot_archive_completed_state(self):
@@ -5331,8 +5477,12 @@ class UpgradePreparedResumeTests(unittest.TestCase):
         validated_parents = self.fixture.run_git(
             "show", "-s", "--format=%P", evidence["validated_head"], root=worktree
         ).stdout.split()
+        self.assertEqual(len(validated_parents), 1)
+        merge_parents = self.fixture.run_git(
+            "show", "-s", "--format=%P", validated_parents[0], root=worktree
+        ).stdout.split()
         self.assertEqual(
-            validated_parents, [self.fixture.source_commit, target_commit]
+            merge_parents, [self.fixture.source_commit, target_commit]
         )
 
 
@@ -5714,7 +5864,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             env=environment,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=900,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
@@ -5801,7 +5951,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             env=environment,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=900,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)

@@ -343,6 +343,23 @@ def load_json_document(path):
     return loaded
 
 
+def _load_json_bytes(content, label):
+    try:
+        document = json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=lambda pairs: _strict_object(pairs),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise UpgradeBlocked(f"{label} is not strict JSON") from error
+    if not isinstance(document, dict):
+        raise UpgradeBlocked(f"{label} root must be an object")
+    return document
+
+
+def _canonical_json_bytes(document):
+    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _directory_flags():
     return (
         os.O_RDONLY
@@ -1095,6 +1112,30 @@ def _atomic_write_at(directory_fd, name, content):
             os.close(descriptor)
         with contextlib.suppress(FileNotFoundError):
             os.unlink(temporary_name, dir_fd=directory_fd)
+
+
+def _atomic_write_configuration(root, name, content):
+    """Replace one tracked .steadflow file without following path symlinks."""
+    descriptors = []
+    try:
+        descriptors.append(os.open(Path(root).absolute(), _directory_flags()))
+        descriptors.append(
+            _open_child_directory(descriptors[-1], ".steadflow", ".steadflow")
+        )
+        try:
+            existing = os.stat(name, dir_fd=descriptors[-1], follow_symlinks=False)
+        except FileNotFoundError as error:
+            raise UpgradeBlocked(f"configuration file is missing: {name}") from error
+        if not stat.S_ISREG(existing.st_mode):
+            raise UpgradeBlocked(f"configuration file must be regular: {name}")
+        token = _atomic_write_at(descriptors[-1], name, content)
+        os.chmod(name, 0o644, dir_fd=descriptors[-1], follow_symlinks=False)
+        os.fsync(descriptors[-1])
+        token["mode"] = 0o644
+        return token
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
 
 
 def _read_regular_at(directory_fd, name):
@@ -2094,6 +2135,7 @@ EVIDENCE_MAPPING_KEYS = {
 CONFLICT_KEYS = frozenset(
     ("binding_sha256", "customization_sha256", "paths")
 )
+BASELINE_PENDING_KEYS = frozenset(("configuration_hashes", "pre_head"))
 
 
 def _validate_hash_mapping(values, expected_keys, pattern, label):
@@ -2120,7 +2162,7 @@ def _load_state(repository, storage):
             raise ValueError("state root must be an object")
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         raise UpgradeBlocked("upgrade state is not valid strict JSON") from error
-    allowed_keys = STATE_KEYS | {"conflicts", "evidence"}
+    allowed_keys = STATE_KEYS | {"baseline", "conflicts", "evidence"}
     if not STATE_KEYS.issubset(state) or not set(state).issubset(allowed_keys):
         missing = ",".join(sorted(STATE_KEYS - set(state))) or "none"
         extra = ",".join(sorted(set(state) - allowed_keys)) or "none"
@@ -2196,10 +2238,26 @@ def _load_state(repository, storage):
             raise UpgradeBlocked(
                 "upgrade state evidence validation_summary_sha256 is invalid"
             )
+    if "baseline" in state:
+        pending = state["baseline"]
+        if not isinstance(pending, dict) or set(pending) != BASELINE_PENDING_KEYS:
+            raise UpgradeBlocked("upgrade state baseline evidence is invalid")
+        if not isinstance(pending["pre_head"], str) or not OBJECT_ID_PATTERN.fullmatch(
+            pending["pre_head"]
+        ):
+            raise UpgradeBlocked("upgrade state baseline pre_head is invalid")
+        _validate_hash_mapping(
+            pending["configuration_hashes"],
+            EVIDENCE_MAPPING_KEYS["configuration_hashes"],
+            SHA256_PATTERN,
+            "baseline configuration_hashes",
+        )
     if state["phase"] == "merged" and "evidence" not in state:
         raise UpgradeBlocked("merged upgrade state requires evidence")
     if state["phase"] != "merged" and "evidence" in state:
         raise UpgradeBlocked("unfinished upgrade state cannot contain evidence")
+    if state["phase"] == "merged" and "baseline" in state:
+        raise UpgradeBlocked("merged upgrade state cannot retain baseline evidence")
     if not isinstance(state["source_branch"], str) or not state["source_branch"]:
         raise UpgradeBlocked("upgrade state source_branch is invalid")
     if not isinstance(state["worktree"], str) or not Path(
@@ -2344,6 +2402,262 @@ def _candidate_binding(repository, worktree):
     paths = _configuration_paths(candidate_repository)
     return head, tree, paths, {
         name: _raw_sha256(path) for name, path in sorted(paths.items())
+    }
+
+
+BASELINE_CONFIGURATION_PATHS = {
+    "customization": ".steadflow/customization.yml",
+    "known_failures": ".steadflow/known-failures.yml",
+    "lock": ".steadflow/upstream-lock.json",
+    "migrations": ".steadflow/migration-checksums.json",
+}
+
+
+def _source_configuration_documents(repository, state, worktree):
+    return {
+        name: _load_json_bytes(
+            repository.read_blob_bytes(state["source_commit"], path, cwd=worktree),
+            f"source {name} configuration",
+        )
+        for name, path in sorted(BASELINE_CONFIGURATION_PATHS.items())
+    }
+
+
+def _reconciled_manifest(repository, state, worktree, source_manifest):
+    manifest = json.loads(json.dumps(source_manifest))
+    report_paths = set(_validation_report_relative_paths(state["release"]))
+    current_changes = _git_change_summary(
+        repository,
+        state["peeled_commit"],
+        repository.run("rev-parse", "HEAD", cwd=worktree, read_only=True).stdout.strip(),
+        worktree,
+    )
+    expected_paths = set(_summary_paths(current_changes)) | report_paths
+    integration = set(manifest["integration_adapter"]["paths"])
+    integration.update(report_paths)
+    manifest["integration_adapter"]["paths"] = sorted(integration)
+    for layer in OWNER_LAYER_KEYS:
+        manifest[layer]["paths"] = sorted(
+            path for path in manifest[layer]["paths"] if path in expected_paths
+        )
+    registered = {
+        path
+        for layer in OWNER_LAYER_KEYS
+        for path in manifest[layer]["paths"]
+    }
+    unowned = sorted(expected_paths - registered)
+    if unowned:
+        raise UpgradeBlocked(
+            "final candidate has unowned paths: " + ", ".join(unowned)
+        )
+    manifest["shared_seams"] = sorted(
+        path for path in manifest["shared_seams"] if path in registered
+    )
+    manifest["generated"]["paths"] = sorted(
+        path for path in manifest["generated"]["paths"] if path in registered
+    )
+    validate_manifest(manifest, sorted(expected_paths), require_exact=True)
+    return manifest
+
+
+def _advanced_baseline_documents(
+    repository,
+    state,
+    worktree,
+    source_documents,
+    go_completed,
+    vitest_completed,
+    go_results,
+    vitest_results,
+):
+    upstream_tree = repository.run(
+        "rev-parse", f"{state['peeled_commit']}^{{tree}}", cwd=worktree, read_only=True
+    ).stdout.strip()
+    lock = dict(source_documents["lock"])
+    lock.update(
+        {
+            "peeled_commit": state["peeled_commit"],
+            "release": state["release"],
+            "tree": upstream_tree,
+        }
+    )
+    _validate_upstream_lock(lock)
+
+    known = json.loads(json.dumps(source_documents["known_failures"]))
+    baseline = known["baseline"]
+    baseline["release"] = state["release"]
+    baseline["commands"] = [
+        "cd backend && go test -json ./... > "
+        f"../.steadflow/work/{state['release']}-go-test.jsonl",
+        "pnpm --dir frontend exec vitest run --reporter=json --outputFile="
+        f"../.steadflow/work/{state['release']}-vitest.json",
+    ]
+    baseline["evidence"] = {
+        "go_json_sha256": hashlib.sha256(
+            go_completed.stdout.encode("utf-8")
+        ).hexdigest(),
+        "vitest_json_sha256": hashlib.sha256(
+            vitest_completed.stdout.encode("utf-8")
+        ).hexdigest(),
+    }
+    baseline["result"] = {
+        "failed": len(go_results["failed"]) + len(vitest_results["failed"]),
+        "go_failed": len(go_results["failed"]),
+        "vitest_failed": len(vitest_results["failed"]),
+    }
+    baseline["historical_observation"] = (
+        f"Certified {state['release']} full Go and Vitest run; exact allowed "
+        "failures, if any, remain governed by entries."
+    )
+    validate_known_failures(known)
+
+    migrations = dict(source_documents["migrations"])
+    migrations["migrations"] = migration_checksums(worktree)
+    validate_migrations(worktree, migrations)
+    manifest = _reconciled_manifest(
+        repository, state, worktree, source_documents["customization"]
+    )
+    return {
+        "customization": manifest,
+        "known_failures": known,
+        "lock": lock,
+        "migrations": migrations,
+    }
+
+
+def _commit_or_reuse_advanced_baseline(
+    repository,
+    storage,
+    state,
+    worktree,
+    source_documents,
+    go_completed,
+    vitest_completed,
+    go_results,
+    vitest_results,
+):
+    documents = _advanced_baseline_documents(
+        repository,
+        state,
+        worktree,
+        source_documents,
+        go_completed,
+        vitest_completed,
+        go_results,
+        vitest_results,
+    )
+    canonical = {
+        BASELINE_CONFIGURATION_PATHS[name]: _canonical_json_bytes(document)
+        for name, document in documents.items()
+    }
+    pre_head = repository.run(
+        "rev-parse", "HEAD", cwd=worktree, read_only=True
+    ).stdout.strip()
+    state["baseline"] = {
+        "configuration_hashes": {
+            name: hashlib.sha256(canonical[path]).hexdigest()
+            for name, path in sorted(BASELINE_CONFIGURATION_PATHS.items())
+        },
+        "pre_head": pre_head,
+    }
+    _write_state(storage, state)
+    for relative_path, content in canonical.items():
+        _atomic_write_configuration(
+            worktree, PurePosixPath(relative_path).name, content
+        )
+    _upgrade_test_hook(repository, "after_baseline_files", state=state)
+    trusted_oids = {
+        path: repository.hash_blob_bytes(content, cwd=worktree)
+        for path, content in canonical.items()
+    }
+    for path, oid in trusted_oids.items():
+        repository.run_without_hooks(
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"100644,{oid},{path}",
+            cwd=worktree,
+            operation="trusted baseline index update",
+        )
+    staged = sorted(
+        path
+        for path in repository.run(
+            "diff", "--cached", "--name-only", "-z", cwd=worktree, read_only=True
+        ).stdout.split("\0")
+        if path
+    )
+    required = {
+        BASELINE_CONFIGURATION_PATHS["customization"],
+        BASELINE_CONFIGURATION_PATHS["known_failures"],
+        BASELINE_CONFIGURATION_PATHS["lock"],
+    }
+    if not required.issubset(staged) or not set(staged).issubset(canonical):
+        raise UpgradeBlocked("candidate baseline staging changed unexpected paths")
+    _upgrade_test_hook(repository, "after_baseline_index", state=state)
+    validated_date = repository.run(
+        "show", "-s", "--format=%cI", "HEAD", cwd=worktree, read_only=True
+    ).stdout.strip()
+    committed = repository.run_without_hooks(
+        "commit",
+        "--no-verify",
+        "--no-gpg-sign",
+        "-m",
+        f"chore(upstream): advance baseline to {state['release']}",
+        cwd=worktree,
+        check=False,
+        extra_environment={
+            "GIT_AUTHOR_DATE": validated_date,
+            "GIT_AUTHOR_EMAIL": "upgrade@steadflow.invalid",
+            "GIT_AUTHOR_NAME": "Steadflow Upgrade",
+            "GIT_COMMITTER_DATE": validated_date,
+            "GIT_COMMITTER_EMAIL": "upgrade@steadflow.invalid",
+            "GIT_COMMITTER_NAME": "Steadflow Upgrade",
+            "GIT_EDITOR": "true",
+            "GIT_SEQUENCE_EDITOR": "true",
+        },
+    )
+    if committed.returncode != 0:
+        raise UpgradeBlocked("candidate baseline commit failed; candidate preserved")
+    _upgrade_test_hook(repository, "after_baseline_commit", state=state)
+    state.pop("baseline", None)
+    _write_state(storage, state)
+    return documents
+
+
+def _validate_advanced_baseline(repository, state, worktree):
+    paths = _configuration_paths(GitRepository(worktree))
+    manifest = load_json_document(paths["customization"])
+    known = load_json_document(paths["known_failures"])
+    migrations = load_json_document(paths["migrations"])
+    lock = load_json_document(paths["lock"])
+    _validate_upstream_lock(lock)
+    if lock["release"] != state["release"] or lock["peeled_commit"] != state["peeled_commit"]:
+        raise UpgradeBlocked("candidate baseline lock does not match target release")
+    expected_tree = repository.run(
+        "rev-parse", f"{state['peeled_commit']}^{{tree}}", cwd=worktree, read_only=True
+    ).stdout.strip()
+    if lock["tree"] != expected_tree:
+        raise UpgradeBlocked("candidate baseline lock tree does not match target release")
+    validate_known_failures(known)
+    if known["baseline"]["release"] != state["release"]:
+        raise UpgradeBlocked("candidate known-failure baseline was not advanced")
+    migration_report = validate_migrations(worktree, migrations)
+    if migration_report["added"]:
+        raise UpgradeBlocked("candidate migration baseline was not advanced")
+    head = repository.run("rev-parse", "HEAD", cwd=worktree, read_only=True).stdout.strip()
+    changes = _git_change_summary(
+        repository, state["peeled_commit"], head, worktree
+    )
+    expected_paths = set(_summary_paths(changes)) | set(
+        _validation_report_relative_paths(state["release"])
+    )
+    ownership = validate_manifest(manifest, sorted(expected_paths), require_exact=True)
+    return {
+        "changed": sorted(expected_paths),
+        "multiply_owned": ownership["multiply_owned"],
+        "registered": ownership["registered"],
+        "status": "PASS",
+        "unowned": ownership["unowned"],
     }
 
 
@@ -2672,7 +2986,9 @@ def _source_configuration_hashes(repository, source_commit, worktree):
     }
 
 
-def _upgrade_audit_context(repository, state, worktree, manifest, lock):
+def _upgrade_audit_context(
+    repository, state, worktree, manifest, lock, *, require_source_configuration=True
+):
     _validate_upstream_lock(lock)
     locked_tree = repository.run(
         "rev-parse",
@@ -2687,7 +3003,7 @@ def _upgrade_audit_context(repository, state, worktree, manifest, lock):
     candidate_configuration_hashes = {
         name: _raw_sha256(path) for name, path in sorted(candidate_paths.items())
     }
-    if candidate_configuration_hashes != _source_configuration_hashes(
+    if require_source_configuration and candidate_configuration_hashes != _source_configuration_hashes(
         repository, state["source_commit"], worktree
     ):
         raise UpgradeBlocked("candidate configuration differs from source commit")
@@ -2810,19 +3126,33 @@ def _validate_success_report(report, state, worktree):
         raise UpgradeBlocked("candidate migration report did not pass")
     candidate_repository = GitRepository(worktree)
     paths = _configuration_paths(candidate_repository)
-    manifest = load_json_document(paths["customization"])
-    lock = load_json_document(paths["lock"])
     expected_configuration = {
         name: _raw_sha256(path) for name, path in sorted(paths.items())
     }
+    source_documents = _source_configuration_documents(
+        candidate_repository, state, worktree
+    )
     expected_audit = _upgrade_audit_context(
-        candidate_repository, state, worktree, manifest, lock
+        candidate_repository,
+        state,
+        worktree,
+        source_documents["customization"],
+        source_documents["lock"],
+        require_source_configuration=False,
     )
     for field, expected in expected_audit.items():
+        if field == "ownership":
+            continue
         if report[field] != expected:
             raise UpgradeBlocked(
                 f"candidate success report {field} binding is invalid"
             )
+    expected_ownership = _validate_advanced_baseline(
+        candidate_repository, state, worktree
+    )
+    if report["ownership"] != expected_ownership:
+        raise UpgradeBlocked("candidate success report ownership binding is invalid")
+    manifest = load_json_document(paths["customization"])
     expected_critical = [
         f"command:{command['name']}" for command in manifest["critical_commands"]
     ]
@@ -2857,7 +3187,7 @@ def _validate_success_report(report, state, worktree):
     return report
 
 
-def validate_upgrade_candidate(repository, state, worktree):
+def validate_upgrade_candidate(repository, storage, state, worktree):
     """Run every candidate gate and return complete evidence before persistence."""
     candidate_head = ""
     candidate_tree = ""
@@ -2885,12 +3215,29 @@ def validate_upgrade_candidate(repository, state, worktree):
                 "configuration_hashes": configuration_hashes,
             }
         )
-        manifest = load_json_document(paths["customization"])
-        lock = load_json_document(paths["lock"])
-        baseline = load_json_document(paths["migrations"])
-        known = load_json_document(paths["known_failures"])
+        source_documents = _source_configuration_documents(
+            repository, state, worktree
+        )
+        current_hashes = {
+            name: _raw_sha256(path) for name, path in sorted(paths.items())
+        }
+        source_hashes = _source_configuration_hashes(
+            repository, state["source_commit"], worktree
+        )
+        baseline_already_advanced = current_hashes != source_hashes
+        if baseline_already_advanced:
+            _validate_advanced_baseline(repository, state, worktree)
+        manifest = source_documents["customization"]
+        lock = source_documents["lock"]
+        baseline = source_documents["migrations"]
+        known = source_documents["known_failures"]
         audit_context = _upgrade_audit_context(
-            repository, state, worktree, manifest, lock
+            repository,
+            state,
+            worktree,
+            manifest,
+            lock,
+            require_source_configuration=not baseline_already_advanced,
         )
         validate_known_failures(known)
         migrations = validate_migrations(worktree, baseline)
@@ -2994,6 +3341,31 @@ def validate_upgrade_candidate(repository, state, worktree):
             "paths": generated_paths,
             "status": "PASS",
         }
+        if not baseline_already_advanced:
+            _commit_or_reuse_advanced_baseline(
+                repository,
+                storage,
+                state,
+                worktree,
+                source_documents,
+                go_completed,
+                vitest_completed,
+                go_results,
+                vitest_results,
+            )
+        candidate_head, candidate_tree, _, configuration_hashes = _candidate_binding(
+            repository, worktree
+        )
+        report.update(
+            {
+                "candidate_head": candidate_head,
+                "candidate_tree": candidate_tree,
+                "configuration_hashes": configuration_hashes,
+            }
+        )
+        advanced_ownership = _validate_advanced_baseline(
+            repository, state, worktree
+        )
         report["status"] = comparison["status"]
     except (OSError, ValueError, ManifestValidationError, MigrationValidationError, UpgradeBlocked) as error:
         report["diagnostic"] = _redact_diagnostic(error)
@@ -3016,7 +3388,7 @@ def validate_upgrade_candidate(repository, state, worktree):
         "full_vitest": report["tests"]["vitest"],
         "generated": report["generated"],
         "migrations": report["migrations"],
-        "ownership": audit_context["ownership"],
+        "ownership": advanced_ownership,
         "peeled_commit": audit_context["peeled_commit"],
         "release": state["release"],
         "schema_version": SUCCESS_REPORT_SCHEMA_VERSION,
@@ -3037,12 +3409,79 @@ def _upgrade_test_hook(repository, event, **values):
         hook(event, **values)
 
 
+def _recover_incomplete_baseline(repository, storage, state, worktree):
+    pending = state.get("baseline")
+    if pending is None:
+        return
+    head = repository.run(
+        "rev-parse", "HEAD", cwd=worktree, read_only=True
+    ).stdout.strip()
+    expected_hashes = pending["configuration_hashes"]
+    source_hashes = _source_configuration_hashes(
+        repository, state["source_commit"], worktree
+    )
+    current_paths = _configuration_paths(GitRepository(worktree))
+    current_hashes = {
+        name: _raw_sha256(path) for name, path in sorted(current_paths.items())
+    }
+    if head == pending["pre_head"]:
+        for name in expected_hashes:
+            if current_hashes[name] not in {expected_hashes[name], source_hashes[name]}:
+                raise UpgradeBlocked(
+                    f"candidate baseline configuration was tampered: {name}"
+                )
+        allowed = set(BASELINE_CONFIGURATION_PATHS.values()) | set(
+            _validation_report_relative_paths(state["release"])
+        )
+        unexpected = sorted(
+            path for _, path in _candidate_status_entries(repository, worktree)
+            if path not in allowed
+        )
+        if unexpected:
+            raise UpgradeBlocked(
+                "candidate dirt outside incomplete baseline: " + ", ".join(unexpected)
+            )
+        for name, relative_path in sorted(BASELINE_CONFIGURATION_PATHS.items()):
+            content = repository.read_blob_bytes(
+                state["source_commit"], relative_path, cwd=worktree
+            )
+            _atomic_write_configuration(
+                worktree, PurePosixPath(relative_path).name, content
+            )
+            oid = repository.hash_blob_bytes(content, cwd=worktree)
+            repository.run_without_hooks(
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                f"100644,{oid},{relative_path}",
+                cwd=worktree,
+                operation="incomplete baseline index recovery",
+            )
+    else:
+        if current_hashes != expected_hashes:
+            raise UpgradeBlocked("committed candidate baseline configuration was tampered")
+        parents = repository.run(
+            "show", "-s", "--format=%P", "HEAD", cwd=worktree, read_only=True
+        ).stdout.split()
+        subject = repository.run(
+            "show", "-s", "--format=%s", "HEAD", cwd=worktree, read_only=True
+        ).stdout.strip()
+        if parents != [pending["pre_head"]] or subject != (
+            f"chore(upstream): advance baseline to {state['release']}"
+        ):
+            raise UpgradeBlocked("candidate baseline commit identity is invalid")
+        _validate_advanced_baseline(repository, state, worktree)
+    state.pop("baseline", None)
+    _write_state(storage, state)
+
+
 def _run_and_persist_candidate_validation(repository, storage, state, worktree):
     state.pop("evidence", None)
     state["phase"] = "validating"
     _write_state(storage, state)
+    _recover_incomplete_baseline(repository, storage, state, worktree)
     _require_report_only_candidate_dirt(repository, state, worktree)
-    report = validate_upgrade_candidate(repository, state, worktree)
+    report = validate_upgrade_candidate(repository, storage, state, worktree)
     _upgrade_test_hook(
         repository,
         "before_success_reports",
@@ -3439,7 +3878,12 @@ def resume_upgrade(repository):
     verify_current(repository, check_ownership=False)
     with _UpgradeStorage(repository) as storage:
         loaded = _load_state(repository, storage)
-        verify_current(repository, ownership_commit=loaded[1]["source_commit"])
+        if _source_identity(repository)[0] == loaded[1]["source_commit"]:
+            verify_current(repository, ownership_commit=loaded[1]["source_commit"])
+        elif loaded[1]["phase"] == "merged":
+            verify_current(repository)
+        else:
+            raise UpgradeBlocked("source HEAD changed since upgrade state was created")
         return _resume_upgrade_locked(repository, storage, loaded=loaded)
 
 

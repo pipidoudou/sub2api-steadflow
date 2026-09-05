@@ -268,13 +268,19 @@
     "backend/migrations/224_user_platform_quotas_add_cn_providers.sql": "a80bf4129f12d09818c495b804c81d2ed2a4ea2bbb87fdd39f59fa336c6e0886",
     "backend/migrations/225_backfill_codex_fingerprint_seed.sql": "2e0a0f6551d026227095394a2d254368d6128ce98a9dc29a7b8de4dcbe64d467",
     "backend/migrations/225_channel_model_time_pricing.sql": "de2b2e411c1b63c320abb76d11a7f482e8d4ae9fe465eb7949e6e1c92e1f69e0",
-    "backend/migrations/226_channel_monitor_quota_mode.sql": "5efcd4dcd8e3cf8d64c0e66adae14836209a125e896d416781495ab8c91a8c1b"
-  },
-  "reviewed_additions": {
-    "backend/migrations/227_composite_routes_add_cn_providers.sql": {
-      "rationale": "Replaces the existing target-platform CHECK constraint with the same constraint name and an expanded allowlist; it does not delete rows, columns, or tables.",
-      "sha256": "21d81a064828e8a544992f98e949053e45e9a135bc011f129147675d94612ddf"
-    }
+    "backend/migrations/226_add_usage_log_effective_model_indexes_notx.sql": "62a2480e55a6ee9499699f8052f859a4ca7c33c0cea4b9340679b78f99d4b9f0",
+    "backend/migrations/226_channel_monitor_quota_mode.sql": "5efcd4dcd8e3cf8d64c0e66adae14836209a125e896d416781495ab8c91a8c1b",
+    "backend/migrations/227_composite_routes_add_cn_providers.sql": "21d81a064828e8a544992f98e949053e45e9a135bc011f129147675d94612ddf",
+    "backend/migrations/228_channel_pricing_multipliers.sql": "cc7d231cc28660c791f924b32c35d8cfce2a474842a0a329ddd61ea7ae2de3a9",
+    "backend/migrations/229_plugins.sql": "941872100def939cadbae9ea6af37483a8466c962d8239e8de79e26f1ebb974e",
+    "backend/migrations/230_plugin_artifacts.sql": "2cf2bee4836306778d6f3a7d27f7da54590026b2269d3a474d1477830850ab7a",
+    "backend/migrations/231_add_usage_log_native_compaction_v2.sql": "8e0ce1864caea450f49b250a2b9c992ef19698a7d689ef772b256a7114e56474",
+    "backend/migrations/231_add_usage_log_requested_reasoning_effort.sql": "6c7a8a4a6546ca933519595daad5788f018fe4228e1de8aac4354626120666e1",
+    "backend/migrations/231_user_restrict_public_groups.sql": "ea2301110ba26614699869ec4919cccd5740eb9655441ab43e80a865fb5ecd88",
+    "backend/migrations/232_channel_cache_write_1h_pricing.sql": "9d3f11a365c790312148930ba2b4861022180be79b1f72b285f95530dd843a4b",
+    "backend/migrations/232_group_force_openai_fast.sql": "df219aaf4d970ce5672165cdd89716ea81ce8f7a269821c86a1d7e0b907ca0da",
+    "backend/migrations/232_group_reasoning_effort_over_limit.sql": "469fd8018b272050de20fde1835699feabc865e2c87d612bff6402821f74a6e8",
+    "backend/migrations/233_group_free_openai_fast.sql": "aff8cc2ca0b370a7dca32c21eda22ae8c07d35db5b229e2681faab02e1eac72c"
   },
   "schema_version": 1
 }

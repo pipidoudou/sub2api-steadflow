@@ -3185,7 +3185,9 @@ class HermeticUpgradeFixture:
         )
         return commit, tag_object
 
-    def create_source_conflict(self, *, register_seam=True, strategy=None):
+    def create_source_conflict(
+        self, *, register_seam=True, strategy=None, delete_source=False
+    ):
         manifest_path = self.fork / ".steadflow" / "customization.yml"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["data"]["paths"].append("shared.txt")
@@ -3205,11 +3207,14 @@ class HermeticUpgradeFixture:
                     }
                 ]
         self.write_json(".steadflow/customization.yml", manifest)
-        (self.fork / "shared.txt").write_text(
-            "steadflow source\n", encoding="utf-8"
-        )
+        if delete_source:
+            (self.fork / "shared.txt").unlink()
+        else:
+            (self.fork / "shared.txt").write_text(
+                "steadflow source\n", encoding="utf-8"
+            )
         paths = ["shared.txt", ".steadflow/customization.yml"]
-        self.run_git("add", *paths, root=self.fork)
+        self.run_git("add", "-A", "--", *paths, root=self.fork)
         self.run_git(
             "commit", "-m", "steadflow shared customization", root=self.fork
         )
@@ -4572,6 +4577,23 @@ class AutomaticConflictStrategyTests(unittest.TestCase):
                 (worktree / "shared.txt").read_text(encoding="utf-8"),
                 "steadflow source\n",
             )
+            self.assertEqual(fixture.read_state()["phase"], "merged")
+        finally:
+            fixture.cleanup()
+
+    def test_take_steadflow_policy_preserves_source_deletion(self):
+        fixture = HermeticUpgradeFixture()
+        try:
+            fixture.create_source_conflict(
+                strategy="take-steadflow", delete_source=True
+            )
+            release = "v1.1.0"
+            fixture.add_release(release, conflict=True)
+
+            completed = fixture.run_upgrade(release)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertFalse((fixture.worktree_path(release) / "shared.txt").exists())
             self.assertEqual(fixture.read_state()["phase"], "merged")
         finally:
             fixture.cleanup()

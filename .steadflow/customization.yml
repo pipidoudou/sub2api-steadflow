@@ -421,7 +421,7 @@
       "owner": "branding_settings",
       "path": "README.md",
       "risk": "medium",
-      "strategy": "semantic-resolver",
+      "strategy": "take-steadflow",
       "tests": [
         "upgrade_contracts"
       ]
@@ -430,7 +430,7 @@
       "owner": "branding_settings",
       "path": "README_CN.md",
       "risk": "medium",
-      "strategy": "semantic-resolver",
+      "strategy": "take-steadflow",
       "tests": [
         "upgrade_contracts"
       ]
@@ -439,7 +439,7 @@
       "owner": "branding_settings",
       "path": "README_JA.md",
       "risk": "medium",
-      "strategy": "semantic-resolver",
+      "strategy": "take-steadflow",
       "tests": [
         "upgrade_contracts"
       ]
@@ -556,7 +556,7 @@
       "owner": "integration_adapter",
       "path": "deploy/config.example.yaml",
       "risk": "medium",
-      "strategy": "semantic-resolver",
+      "strategy": "take-steadflow",
       "tests": [
         "upgrade_contracts"
       ]

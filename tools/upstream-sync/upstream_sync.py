@@ -3679,6 +3679,17 @@ def _seam_policy_map(manifest):
 
 
 def _checkout_conflict_side(repository, worktree, path, side):
+    stage = "2" if side == "ours" else "3"
+    present = repository.run_without_hooks(
+        "cat-file", "-e", f":{stage}:{path}", cwd=worktree, check=False
+    )
+    if present.returncode != 0:
+        removed = repository.run_without_hooks(
+            "rm", "-f", "--ignore-unmatch", "--", path, cwd=worktree, check=False
+        )
+        if removed.returncode != 0:
+            raise UpgradeBlocked(f"unable to apply deleted {side} conflict policy for {path}")
+        return
     completed = repository.run_without_hooks(
         "checkout", f"--{side}", "--", path, cwd=worktree, check=False
     )

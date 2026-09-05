@@ -1,15 +1,15 @@
 {
   "baseline": {
     "commands": [
-      "cd backend && go test -json ./... > ../.steadflow/work/v0.2.0-go-test.jsonl",
-      "pnpm --dir frontend exec vitest run --reporter=json --outputFile=../.steadflow/work/v0.2.0-vitest.json"
+      "cd backend && go test -json ./... > ../.steadflow/work/v0.2.1-go-test.jsonl",
+      "pnpm --dir frontend exec vitest run --reporter=json --outputFile=../.steadflow/work/v0.2.1-vitest.json"
     ],
     "evidence": {
-      "go_json_sha256": "c2fbb1e1de756e5144ef7951e4a2e56354f09d24e03d956b7872b8005566bba0",
-      "vitest_json_sha256": "b96b5b9f7a7f315fa4092d3858cf799dae4b519bf729bf19844ce658e9322ad2"
+      "go_json_sha256": "d17551cd328d35d2ad76166a84f2a267e3c4338dcf81a96767fb911c0f164b7a",
+      "vitest_json_sha256": "9a10f4b1fe58aaf5e8a9e6f105446e8ac1e3838dfcb3db78c04bcbdfa463b10b"
     },
-    "historical_observation": "Certified v0.2.0 full Go and Vitest run; exact allowed failures, if any, remain governed by entries.",
-    "release": "v0.2.0",
+    "historical_observation": "Certified v0.2.1 full Go and Vitest run; exact allowed failures, if any, remain governed by entries.",
+    "release": "v0.2.1",
     "result": {
       "failed": 0,
       "go_failed": 0,

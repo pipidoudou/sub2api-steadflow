@@ -195,7 +195,6 @@
       "backend/ent/distributorbinding_query.go",
       "backend/ent/distributorbinding_update.go",
       "backend/ent/ent.go",
-      "backend/ent/group.go",
       "backend/ent/hook/hook.go",
       "backend/ent/intercept/intercept.go",
       "backend/ent/migrate/schema.go",
@@ -236,6 +235,8 @@
       ".steadflow/migration-checksums.json",
       ".steadflow/reports/v0.2.0.json",
       ".steadflow/reports/v0.2.0.md",
+      ".steadflow/reports/v0.2.1.json",
+      ".steadflow/reports/v0.2.1.md",
       ".steadflow/upstream-lock.json",
       "DEV_GUIDE.md",
       "Dockerfile",
@@ -258,7 +259,6 @@
       "assets/partners/logos/haoai.png",
       "assets/partners/logos/lanox.jpg",
       "assets/partners/logos/nagora.png",
-      "assets/partners/logos/novada.png",
       "assets/partners/logos/openmodel.jpg",
       "assets/partners/logos/pateway.png",
       "assets/partners/logos/pincc-logo.png",
@@ -269,11 +269,9 @@
       "assets/partners/logos/rapidproxy.jpg",
       "assets/partners/logos/runapi.png",
       "assets/partners/logos/silkapi.png",
-      "assets/partners/logos/sui-xiang.jpg",
       "assets/partners/logos/swiftprox.png",
       "assets/partners/logos/veilx.png",
       "backend/cmd/server/wire_gen.go",
-      "backend/ent/group.go",
       "backend/go.mod",
       "backend/go.sum",
       "backend/internal/handler/admin/payment_handler.go",
@@ -447,15 +445,6 @@
     {
       "owner": "integration_adapter",
       "path": "backend/cmd/server/wire_gen.go",
-      "risk": "medium",
-      "strategy": "regenerate",
-      "tests": [
-        "generated_code"
-      ]
-    },
-    {
-      "owner": "integration_adapter",
-      "path": "backend/ent/group.go",
       "risk": "medium",
       "strategy": "regenerate",
       "tests": [

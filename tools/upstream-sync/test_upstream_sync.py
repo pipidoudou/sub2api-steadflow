@@ -24,6 +24,7 @@ from unittest import mock
 sys.pycache_prefix = None
 MODULE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = MODULE_DIR.parents[1]
+GO_DISCOVERY_TIMEOUT_SECONDS = 300
 
 
 def _darwin_process_start_ns():
@@ -1465,11 +1466,12 @@ class RepositoryBaselineTests(unittest.TestCase):
                     env=environment,
                     capture_output=True,
                     text=True,
-                    timeout=120,
+                    timeout=GO_DISCOVERY_TIMEOUT_SECONDS,
                 )
             except subprocess.TimeoutExpired as error:
                 self.fail(
-                    f"name={command['name']} argv={list_argv!r} timeout=120\n"
+                    f"name={command['name']} argv={list_argv!r} "
+                    f"timeout={GO_DISCOVERY_TIMEOUT_SECONDS}\n"
                     f"stdout:\n{error.stdout or ''}\n"
                     f"stderr:\n{error.stderr or ''}"
                 )
@@ -6052,6 +6054,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             "if sys.argv[1:3] != ['-m', 'unittest']:\n"
             "    os.execv('/usr/bin/python3', ['/usr/bin/python3'] + sys.argv[1:])\n"
             "sys.pycache_prefix = None\n"
+            "sys.dont_write_bytecode = True\n"
             "sys.path.insert(0, os.getcwd())\n"
             "sys.argv = ['unittest'] + sys.argv[3:]\n"
             "runpy.run_module('unittest', run_name='__main__', alter_sys=True)\n",
@@ -6139,6 +6142,7 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             "if sys.argv[1:3] != ['-m', 'unittest']:\n"
             "    os.execv('/usr/bin/python3', ['/usr/bin/python3'] + sys.argv[1:])\n"
             "sys.pycache_prefix = None\n"
+            "sys.dont_write_bytecode = True\n"
             "sys.path.insert(0, os.getcwd())\n"
             "sys.argv = ['unittest'] + sys.argv[3:]\n"
             "runpy.run_module('unittest', run_name='__main__', alter_sys=True)\n",

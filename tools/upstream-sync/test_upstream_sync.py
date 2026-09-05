@@ -79,7 +79,7 @@ def _linux_process_start_upper_bound_ns():
     realtime_after = time.time_ns()
     realtime_minus_boottime_upper = realtime_after - boottime
     return realtime_minus_boottime_upper + (
-        start_ticks * 1_000_000_000 // ticks_per_second
+        (start_ticks + 1) * 1_000_000_000 // ticks_per_second
     )
 
 
@@ -6006,6 +6006,20 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
         self.assertFalse(suite_created.exists())
         self.assertEqual(preexisting.read_bytes(), b"user cache\n")
         self.assertTrue(cache_dir.is_dir())
+
+    def test_linux_process_start_upper_bound_includes_the_full_clock_tick(self):
+        stat_fields = ["0"] * 22
+        stat_fields[21] = "123"
+        with (
+            mock.patch.object(Path, "read_text", return_value=" ".join(stat_fields)),
+            mock.patch.object(os, "sysconf", return_value=100),
+            mock.patch.object(time, "CLOCK_BOOTTIME", 7, create=True),
+            mock.patch.object(time, "clock_gettime_ns", return_value=50_000_000_000),
+            mock.patch.object(time, "time_ns", return_value=1_000_000_000_000),
+        ):
+            upper_bound = _linux_process_start_upper_bound_ns()
+
+        self.assertEqual(upper_bound, 951_240_000_000)
 
     def test_exact_unittest_command_leaves_disposable_clone_without_pycache(self):
         if os.environ.get("STEADFLOW_NESTED_EXACT_SUITE") == "1":

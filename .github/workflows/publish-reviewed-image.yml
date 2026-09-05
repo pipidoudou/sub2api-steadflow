@@ -1,0 +1,99 @@
+name: Publish Reviewed Steadflow Image
+
+on:
+  push:
+    tags:
+      - 'steadflow-v*'
+  workflow_dispatch:
+    inputs:
+      reviewed_tag:
+        description: Existing immutable steadflow-v* tag to backfill
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: source
+        name: Bind immutable reviewed tag
+        shell: bash
+        env:
+          REVIEWED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REVIEWED_TAG" =~ ^steadflow-v[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]]; then
+            echo 'Invalid reviewed tag.' >&2
+            exit 2
+          fi
+          tag_ref="refs/tags/$REVIEWED_TAG"
+          tag_object="$(git rev-parse --verify "$tag_ref")"
+          if [[ "$(git cat-file -t "$tag_object")" != 'tag' ]]; then
+            echo 'Reviewed release tag must be annotated.' >&2
+            exit 2
+          fi
+          commit="$(git rev-parse "$tag_ref^{}")"
+          if [[ "$(git rev-parse HEAD)" != "$commit" ]]; then
+            echo 'Checked-out commit is not bound to the requested reviewed tag.' >&2
+            exit 2
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "tag=$REVIEWED_TAG" >> "$GITHUB_OUTPUT"
+      - name: Verify immutable reviewed source
+        run: ./tools/upstream-sync/upgrade --verify-current
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "name=${REGISTRY}/${repository}" >> "$GITHUB_OUTPUT"
+      - id: version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Invalid backend version.' >&2
+            exit 2
+          fi
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+            COMMIT=${{ steps.source.outputs.commit }}
+          tags: |
+            ${{ steps.image.outputs.name }}:source-${{ steps.source.outputs.commit }}
+            ${{ steps.image.outputs.name }}:${{ steps.source.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.source.outputs.commit }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - name: Attest reviewed image provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

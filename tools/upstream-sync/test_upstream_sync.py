@@ -435,13 +435,54 @@ class OwnershipManifestTests(unittest.TestCase):
         ):
             validate_manifest(manifest, ["data/README.md"])
 
-    def test_manifest_requires_schema_version_one(self):
+    def test_manifest_rejects_unknown_schema_version(self):
         manifest = manifest_with_paths(data=["data/README.md"])
-        manifest["schema_version"] = 2
+        manifest["schema_version"] = 3
 
         with self.assertRaisesRegex(
             ManifestValidationError,
-            r"schema_version must be integer 1",
+            r"schema_version must be integer 1 or 2",
+        ):
+            validate_manifest(manifest, ["data/README.md"])
+
+    def test_schema_two_seams_carry_resolution_policy(self):
+        manifest = manifest_with_paths(
+            integration_adapter=["backend/internal/server/router.go"]
+        )
+        manifest["schema_version"] = 2
+        manifest["shared_seams"] = [
+            {
+                "owner": "integration_adapter",
+                "path": "backend/internal/server/router.go",
+                "risk": "high",
+                "strategy": "semantic-resolver",
+                "tests": ["full_product_regression"],
+            }
+        ]
+
+        report = validate_manifest(
+            manifest, ["backend/internal/server/router.go"]
+        )
+
+        self.assertEqual(
+            report["shared_seams"], ["backend/internal/server/router.go"]
+        )
+
+    def test_schema_two_rejects_invalid_seam_policy(self):
+        manifest = manifest_with_paths(data=["data/README.md"])
+        manifest["schema_version"] = 2
+        manifest["shared_seams"] = [
+            {
+                "owner": "data",
+                "path": "data/README.md",
+                "risk": "high",
+                "strategy": "guess",
+                "tests": [],
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            ManifestValidationError, r"shared_seams\[0\]\.strategy is invalid"
         ):
             validate_manifest(manifest, ["data/README.md"])
 
@@ -1259,8 +1300,8 @@ class RepositoryBaselineTests(unittest.TestCase):
                     "5f1c8d806c6fe2eee91e9e082c575b21e5eab0edccd5369cfb653a7dfdecd11a",
                 ),
                 "integration_adapter": (
-                    420,
-                    "8d4acc6528ac0a6af002d8c67a8d4abcb3a3eeb82b5f47473445237c878da532",
+                    140,
+                    "7f809e29ecfed38a7cae78aa06eec3c22a911246378fb691b7cb67f586c18856",
                 ),
             },
         }
@@ -1276,7 +1317,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         certified_paths = [
             path for layer in OWNER_LAYER_KEYS for path in manifest[layer]["paths"]
         ]
-        expected_total = {"v0.1.178": 525, "v0.2.0": 522}[release]
+        expected_total = {"v0.1.178": 525, "v0.2.0": 242}[release]
         self.assertEqual(len(certified_paths), expected_total)
         self.assertEqual(len(set(certified_paths)), expected_total)
         report = validate_manifest(manifest, certified_paths)
@@ -1318,7 +1359,11 @@ class RepositoryBaselineTests(unittest.TestCase):
                 ["backend/cmd/server/VERSION", "backend/ent/schema/group.go"]
             )
             common_shared_seams.sort()
-        self.assertEqual(manifest["shared_seams"], common_shared_seams)
+        seam_paths = [
+            seam["path"] if isinstance(seam, dict) else seam
+            for seam in manifest["shared_seams"]
+        ]
+        self.assertEqual(seam_paths, common_shared_seams)
         generated_from_tree = []
         for relative in certified_paths:
             path = REPO_ROOT / relative
@@ -1352,9 +1397,34 @@ class RepositoryBaselineTests(unittest.TestCase):
         manifest = self.load_deterministic_json(".steadflow/customization.yml")
         required_handler_seam = "backend/internal/handler/handler.go"
 
-        self.assertIn(required_handler_seam, manifest["shared_seams"])
-        report = validate_manifest(manifest, manifest["shared_seams"])
-        self.assertEqual(report["owned"], manifest["shared_seams"])
+        seam_paths = [
+            seam["path"] if isinstance(seam, dict) else seam
+            for seam in manifest["shared_seams"]
+        ]
+        self.assertIn(required_handler_seam, seam_paths)
+        report = validate_manifest(manifest, seam_paths)
+        self.assertEqual(report["owned"], seam_paths)
+
+    def test_ci_runs_tool_suite_only_when_tooling_changes(self):
+        workflow = (
+            REPO_ROOT / ".github/workflows/steadflow-upstream-ci.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: Detect upstream-sync tooling changes", workflow)
+        self.assertIn("if: steps.tooling.outputs.changed == 'true'", workflow)
+        self.assertNotIn("docker build -f Dockerfile", workflow)
+
+    def test_reviewed_tag_builds_and_attests_one_source_image(self):
+        workflow = (
+            REPO_ROOT / ".github/workflows/publish-reviewed-image.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("docker/build-push-action@"), 1)
+        self.assertIn("actions/attest-build-provenance@v3", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("reviewed_tag:", workflow)
+        self.assertIn('git cat-file -t "$tag_object"', workflow)
+        self.assertIn('git rev-parse "$tag_ref^{}"', workflow)
+        self.assertIn(":source-${{ steps.source.outputs.commit }}", workflow)
+        self.assertNotIn(":source-${{ github.sha }}", workflow)
 
     def test_certified_critical_commands_match_zero_waiver_contracts(self):
         manifest = self.load_deterministic_json(".steadflow/customization.yml")
@@ -3115,13 +3185,25 @@ class HermeticUpgradeFixture:
         )
         return commit, tag_object
 
-    def create_source_conflict(self, *, register_seam=True):
+    def create_source_conflict(self, *, register_seam=True, strategy=None):
         manifest_path = self.fork / ".steadflow" / "customization.yml"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["data"]["paths"].append("shared.txt")
         manifest["data"]["paths"].sort()
         if register_seam:
-            manifest["shared_seams"] = ["shared.txt"]
+            if strategy is None:
+                manifest["shared_seams"] = ["shared.txt"]
+            else:
+                manifest["schema_version"] = 2
+                manifest["shared_seams"] = [
+                    {
+                        "owner": "data",
+                        "path": "shared.txt",
+                        "risk": "medium",
+                        "strategy": strategy,
+                        "tests": [],
+                    }
+                ]
         self.write_json(".steadflow/customization.yml", manifest)
         (self.fork / "shared.txt").write_text(
             "steadflow source\n", encoding="utf-8"
@@ -4473,6 +4555,27 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
         ).stdout.encode("utf-8")
         self.assertEqual(committed, captured["canonical"])
         self.assertNotEqual(committed, attacker_bytes)
+
+class AutomaticConflictStrategyTests(unittest.TestCase):
+    def test_take_steadflow_policy_completes_known_conflict(self):
+        fixture = HermeticUpgradeFixture()
+        try:
+            fixture.create_source_conflict(strategy="take-steadflow")
+            release = "v1.1.0"
+            fixture.add_release(release, conflict=True)
+
+            completed = fixture.run_upgrade(release)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            worktree = fixture.worktree_path(release)
+            self.assertEqual(
+                (worktree / "shared.txt").read_text(encoding="utf-8"),
+                "steadflow source\n",
+            )
+            self.assertEqual(fixture.read_state()["phase"], "merged")
+        finally:
+            fixture.cleanup()
+
 
 class UpgradeConflictContinueTests(unittest.TestCase):
     def setUp(self):

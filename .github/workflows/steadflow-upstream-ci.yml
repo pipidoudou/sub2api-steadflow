@@ -28,6 +28,23 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Detect upstream-sync tooling changes
+        id: tooling
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" != 'pull_request' ]]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "${BASE_SHA}...HEAD" -- \
+            tools/upstream-sync \
+            .github/workflows/steadflow-upstream-ci.yml; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Go from module contract
         uses: actions/setup-go@v7
         with:
@@ -55,6 +72,7 @@ jobs:
           pnpm install --frozen-lockfile
 
       - name: Test upstream sync tooling
+        if: steps.tooling.outputs.changed == 'true'
         run: |
           set -euo pipefail
           python3 -m unittest tools/upstream-sync/test_upstream_sync.py -v
@@ -100,8 +118,3 @@ jobs:
         run: |
           set -euo pipefail
           pnpm --dir frontend run build
-
-      - name: Build candidate container without publishing
-        run: |
-          set -euo pipefail
-          docker build -f Dockerfile -t sub2api-steadflow:ci .

@@ -219,292 +219,12 @@
   },
   "integration_adapter": {
     "paths": [
-      ".agents/skills/ab-testing/SKILL.md",
-      ".agents/skills/ab-testing/evals/evals.json",
-      ".agents/skills/ab-testing/references/sample-size-guide.md",
-      ".agents/skills/ab-testing/references/test-templates.md",
-      ".agents/skills/ad-creative/SKILL.md",
-      ".agents/skills/ad-creative/evals/evals.json",
-      ".agents/skills/ad-creative/references/generative-tools.md",
-      ".agents/skills/ad-creative/references/platform-specs.md",
-      ".agents/skills/ads/SKILL.md",
-      ".agents/skills/ads/evals/evals.json",
-      ".agents/skills/ads/references/ad-copy-templates.md",
-      ".agents/skills/ads/references/audience-targeting.md",
-      ".agents/skills/ads/references/conversion-tracking.md",
-      ".agents/skills/ads/references/platform-setup-checklists.md",
-      ".agents/skills/ai-seo/SKILL.md",
-      ".agents/skills/ai-seo/evals/evals.json",
-      ".agents/skills/ai-seo/references/content-patterns.md",
-      ".agents/skills/ai-seo/references/content-types.md",
-      ".agents/skills/ai-seo/references/platform-ranking-factors.md",
-      ".agents/skills/analytics/SKILL.md",
-      ".agents/skills/analytics/evals/evals.json",
-      ".agents/skills/analytics/references/event-library.md",
-      ".agents/skills/analytics/references/ga4-implementation.md",
-      ".agents/skills/analytics/references/gtm-implementation.md",
-      ".agents/skills/aso/SKILL.md",
-      ".agents/skills/aso/evals/evals.json",
-      ".agents/skills/aso/references/apple-specs.md",
-      ".agents/skills/aso/references/benchmarks.md",
-      ".agents/skills/aso/references/google-play-specs.md",
-      ".agents/skills/aso/references/report-template.md",
-      ".agents/skills/aso/references/scoring-criteria.md",
-      ".agents/skills/churn-prevention/SKILL.md",
-      ".agents/skills/churn-prevention/evals/evals.json",
-      ".agents/skills/churn-prevention/references/cancel-flow-patterns.md",
-      ".agents/skills/churn-prevention/references/dunning-playbook.md",
-      ".agents/skills/co-marketing/SKILL.md",
-      ".agents/skills/co-marketing/evals/evals.json",
-      ".agents/skills/cold-email/SKILL.md",
-      ".agents/skills/cold-email/evals/evals.json",
-      ".agents/skills/cold-email/references/benchmarks.md",
-      ".agents/skills/cold-email/references/follow-up-sequences.md",
-      ".agents/skills/cold-email/references/frameworks.md",
-      ".agents/skills/cold-email/references/personalization.md",
-      ".agents/skills/cold-email/references/subject-lines.md",
-      ".agents/skills/community-marketing/SKILL.md",
-      ".agents/skills/community-marketing/evals/evals.json",
-      ".agents/skills/competitor-profiling/SKILL.md",
-      ".agents/skills/competitor-profiling/evals/evals.json",
-      ".agents/skills/competitor-profiling/references/templates.md",
-      ".agents/skills/competitor-profiling/references/tool-reference.md",
-      ".agents/skills/competitors/SKILL.md",
-      ".agents/skills/competitors/evals/evals.json",
-      ".agents/skills/competitors/references/content-architecture.md",
-      ".agents/skills/competitors/references/templates.md",
-      ".agents/skills/content-strategy/SKILL.md",
-      ".agents/skills/content-strategy/evals/evals.json",
-      ".agents/skills/content-strategy/references/headless-cms.md",
-      ".agents/skills/copy-editing/SKILL.md",
-      ".agents/skills/copy-editing/evals/evals.json",
-      ".agents/skills/copy-editing/references/checklist.md",
-      ".agents/skills/copy-editing/references/content-refresh.md",
-      ".agents/skills/copy-editing/references/plain-english-alternatives.md",
-      ".agents/skills/copywriting/SKILL.md",
-      ".agents/skills/copywriting/evals/evals.json",
-      ".agents/skills/copywriting/references/copy-frameworks.md",
-      ".agents/skills/copywriting/references/natural-transitions.md",
-      ".agents/skills/cro/SKILL.md",
-      ".agents/skills/cro/evals/evals.json",
-      ".agents/skills/cro/references/experiments.md",
-      ".agents/skills/cro/references/form.md",
-      ".agents/skills/customer-research/SKILL.md",
-      ".agents/skills/customer-research/evals/evals.json",
-      ".agents/skills/customer-research/references/source-guides.md",
-      ".agents/skills/directory-submissions/SKILL.md",
-      ".agents/skills/directory-submissions/evals/evals.json",
-      ".agents/skills/directory-submissions/references/directory-list.md",
-      ".agents/skills/directory-submissions/references/positioning-variations.md",
-      ".agents/skills/directory-submissions/references/submission-tracker-template.csv",
-      ".agents/skills/emails/SKILL.md",
-      ".agents/skills/emails/evals/evals.json",
-      ".agents/skills/emails/references/copy-guidelines.md",
-      ".agents/skills/emails/references/email-types.md",
-      ".agents/skills/emails/references/sequence-templates.md",
-      ".agents/skills/find-skills/SKILL.md",
-      ".agents/skills/free-tools/SKILL.md",
-      ".agents/skills/free-tools/evals/evals.json",
-      ".agents/skills/free-tools/references/tool-types.md",
-      ".agents/skills/image/SKILL.md",
-      ".agents/skills/image/evals/evals.json",
-      ".agents/skills/image/references/ai-image-prompting.md",
-      ".agents/skills/launch/SKILL.md",
-      ".agents/skills/launch/evals/evals.json",
-      ".agents/skills/lead-magnets/SKILL.md",
-      ".agents/skills/lead-magnets/evals/evals.json",
-      ".agents/skills/lead-magnets/references/benchmarks.md",
-      ".agents/skills/lead-magnets/references/format-guide.md",
-      ".agents/skills/marketing-ideas/SKILL.md",
-      ".agents/skills/marketing-ideas/evals/evals.json",
-      ".agents/skills/marketing-ideas/references/ideas-by-category.md",
-      ".agents/skills/marketing-plan/SKILL.md",
-      ".agents/skills/marketing-plan/evals/evals.json",
-      ".agents/skills/marketing-plan/references/aarrr-framework.md",
-      ".agents/skills/marketing-plan/references/budget-planning.md",
-      ".agents/skills/marketing-plan/references/client-types.md",
-      ".agents/skills/marketing-plan/references/current-state-rubric.md",
-      ".agents/skills/marketing-plan/references/example-quietude.md",
-      ".agents/skills/marketing-plan/references/funding-stage-unlocks.md",
-      ".agents/skills/marketing-plan/references/growth-patterns.md",
-      ".agents/skills/marketing-plan/references/idea-cross-reference.md",
-      ".agents/skills/marketing-plan/references/measurement-framework.md",
-      ".agents/skills/marketing-plan/references/methodology.md",
-      ".agents/skills/marketing-plan/references/ops-stack-mapping.md",
-      ".agents/skills/marketing-plan/references/plan-template.md",
-      ".agents/skills/marketing-plan/references/team-and-agency-model.md",
-      ".agents/skills/marketing-psychology/SKILL.md",
-      ".agents/skills/marketing-psychology/evals/evals.json",
-      ".agents/skills/onboarding/SKILL.md",
-      ".agents/skills/onboarding/evals/evals.json",
-      ".agents/skills/onboarding/references/experiments.md",
-      ".agents/skills/paywalls/SKILL.md",
-      ".agents/skills/paywalls/evals/evals.json",
-      ".agents/skills/paywalls/references/experiments.md",
-      ".agents/skills/popups/SKILL.md",
-      ".agents/skills/popups/evals/evals.json",
-      ".agents/skills/pricing/SKILL.md",
-      ".agents/skills/pricing/evals/evals.json",
-      ".agents/skills/pricing/references/research-methods.md",
-      ".agents/skills/pricing/references/tier-structure.md",
-      ".agents/skills/product-marketing/SKILL.md",
-      ".agents/skills/product-marketing/evals/evals.json",
-      ".agents/skills/programmatic-seo/SKILL.md",
-      ".agents/skills/programmatic-seo/evals/evals.json",
-      ".agents/skills/programmatic-seo/references/playbooks.md",
-      ".agents/skills/prospecting/SKILL.md",
-      ".agents/skills/prospecting/evals/evals.json",
-      ".agents/skills/prospecting/references/b2b-prospecting.md",
-      ".agents/skills/prospecting/references/compliance.md",
-      ".agents/skills/prospecting/references/data-sources.md",
-      ".agents/skills/prospecting/references/local-prospecting.md",
-      ".agents/skills/prospecting/references/saas-prospecting.md",
-      ".agents/skills/public-relations/SKILL.md",
-      ".agents/skills/public-relations/references/journalist-pitching.md",
-      ".agents/skills/public-relations/references/media-outlets.md",
-      ".agents/skills/public-relations/references/newsjacking.md",
-      ".agents/skills/public-relations/references/press-platforms.md",
-      ".agents/skills/referrals/SKILL.md",
-      ".agents/skills/referrals/evals/evals.json",
-      ".agents/skills/referrals/references/affiliate-programs.md",
-      ".agents/skills/referrals/references/program-examples.md",
-      ".agents/skills/revops/SKILL.md",
-      ".agents/skills/revops/evals/evals.json",
-      ".agents/skills/revops/references/automation-playbooks.md",
-      ".agents/skills/revops/references/lifecycle-definitions.md",
-      ".agents/skills/revops/references/routing-rules.md",
-      ".agents/skills/revops/references/scoring-models.md",
-      ".agents/skills/sales-enablement/SKILL.md",
-      ".agents/skills/sales-enablement/evals/evals.json",
-      ".agents/skills/sales-enablement/references/deck-frameworks.md",
-      ".agents/skills/sales-enablement/references/demo-scripts.md",
-      ".agents/skills/sales-enablement/references/objection-library.md",
-      ".agents/skills/sales-enablement/references/one-pager-templates.md",
-      ".agents/skills/schema/SKILL.md",
-      ".agents/skills/schema/evals/evals.json",
-      ".agents/skills/schema/references/schema-examples.md",
-      ".agents/skills/seo-audit/SKILL.md",
-      ".agents/skills/seo-audit/evals/evals.json",
-      ".agents/skills/seo-audit/references/ai-writing-detection.md",
-      ".agents/skills/seo-audit/references/international-seo.md",
-      ".agents/skills/signup/SKILL.md",
-      ".agents/skills/signup/evals/evals.json",
-      ".agents/skills/site-architecture/SKILL.md",
-      ".agents/skills/site-architecture/evals/evals.json",
-      ".agents/skills/site-architecture/references/mermaid-templates.md",
-      ".agents/skills/site-architecture/references/navigation-patterns.md",
-      ".agents/skills/site-architecture/references/site-type-templates.md",
-      ".agents/skills/sms/SKILL.md",
-      ".agents/skills/sms/evals/evals.json",
-      ".agents/skills/sms/references/compliance.md",
-      ".agents/skills/sms/references/platforms.md",
-      ".agents/skills/sms/references/sequence-templates.md",
-      ".agents/skills/social/SKILL.md",
-      ".agents/skills/social/evals/evals.json",
-      ".agents/skills/social/references/listening-sources-template.md",
-      ".agents/skills/social/references/listening.md",
-      ".agents/skills/social/references/platform-limits.md",
-      ".agents/skills/social/references/platforms.md",
-      ".agents/skills/social/references/post-templates.md",
-      ".agents/skills/social/references/reverse-engineering.md",
-      ".agents/skills/social/references/short-form-video.md",
-      ".agents/skills/video/SKILL.md",
-      ".agents/skills/video/evals/evals.json",
-      ".agents/skills/video/references/ai-video-prompting.md",
-      ".agents/skills/web-video-presentation/README.md",
-      ".agents/skills/web-video-presentation/README.zh-CN.md",
-      ".agents/skills/web-video-presentation/SKILL.md",
-      ".agents/skills/web-video-presentation/manifest.json",
-      ".agents/skills/web-video-presentation/references/AUDIO.md",
-      ".agents/skills/web-video-presentation/references/CHAPTER-CRAFT.md",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/README.md",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/case-tech-review/README.md",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/case-tech-review/outline-snippet.md",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/hook-chapter/README.md",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/hook-chapter/chapter.css",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/hook-chapter/chapter.tsx",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/list-reveal/README.md",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/list-reveal/chapter.css",
-      ".agents/skills/web-video-presentation/references/EXAMPLES/list-reveal/chapter.tsx",
-      ".agents/skills/web-video-presentation/references/OUTLINE-FORMAT.md",
-      ".agents/skills/web-video-presentation/references/RECORDING.md",
-      ".agents/skills/web-video-presentation/references/SCRIPT-STYLE.md",
-      ".agents/skills/web-video-presentation/references/THEMES.md",
-      ".agents/skills/web-video-presentation/templates/index.html",
-      ".agents/skills/web-video-presentation/templates/src/App.tsx",
-      ".agents/skills/web-video-presentation/templates/src/chapters/01-example/Example.css",
-      ".agents/skills/web-video-presentation/templates/src/chapters/01-example/Example.tsx",
-      ".agents/skills/web-video-presentation/templates/src/chapters/01-example/narrations.ts",
-      ".agents/skills/web-video-presentation/templates/src/components/AutoStartGate.css",
-      ".agents/skills/web-video-presentation/templates/src/components/AutoStartGate.tsx",
-      ".agents/skills/web-video-presentation/templates/src/components/AutoToggle.css",
-      ".agents/skills/web-video-presentation/templates/src/components/AutoToggle.tsx",
-      ".agents/skills/web-video-presentation/templates/src/components/MaskReveal.tsx",
-      ".agents/skills/web-video-presentation/templates/src/components/ProgressBar.css",
-      ".agents/skills/web-video-presentation/templates/src/components/ProgressBar.tsx",
-      ".agents/skills/web-video-presentation/templates/src/components/Stage.tsx",
-      ".agents/skills/web-video-presentation/templates/src/hooks/useAudioPlayer.ts",
-      ".agents/skills/web-video-presentation/templates/src/hooks/useAutoMode.ts",
-      ".agents/skills/web-video-presentation/templates/src/hooks/useStageScale.ts",
-      ".agents/skills/web-video-presentation/templates/src/hooks/useStepper.ts",
-      ".agents/skills/web-video-presentation/templates/src/main.tsx",
-      ".agents/skills/web-video-presentation/templates/src/registry/chapters.ts",
-      ".agents/skills/web-video-presentation/templates/src/registry/types.ts",
-      ".agents/skills/web-video-presentation/templates/src/styles/animations.css",
-      ".agents/skills/web-video-presentation/templates/src/styles/base.css",
-      ".agents/skills/web-video-presentation/templates/src/styles/fonts.css",
-      ".agents/skills/web-video-presentation/templates/vite.config.ts",
-      ".agents/skills/web-video-presentation/themes/bauhaus-bold/theme.json",
-      ".agents/skills/web-video-presentation/themes/bauhaus-bold/tokens.css",
-      ".agents/skills/web-video-presentation/themes/blueprint/theme.json",
-      ".agents/skills/web-video-presentation/themes/blueprint/tokens.css",
-      ".agents/skills/web-video-presentation/themes/bold-signal/theme.json",
-      ".agents/skills/web-video-presentation/themes/bold-signal/tokens.css",
-      ".agents/skills/web-video-presentation/themes/chalk-garden/theme.json",
-      ".agents/skills/web-video-presentation/themes/chalk-garden/tokens.css",
-      ".agents/skills/web-video-presentation/themes/creative-voltage/theme.json",
-      ".agents/skills/web-video-presentation/themes/creative-voltage/tokens.css",
-      ".agents/skills/web-video-presentation/themes/dark-botanical/theme.json",
-      ".agents/skills/web-video-presentation/themes/dark-botanical/tokens.css",
-      ".agents/skills/web-video-presentation/themes/dune/theme.json",
-      ".agents/skills/web-video-presentation/themes/dune/tokens.css",
-      ".agents/skills/web-video-presentation/themes/electric-studio/theme.json",
-      ".agents/skills/web-video-presentation/themes/electric-studio/tokens.css",
-      ".agents/skills/web-video-presentation/themes/forest-ink/theme.json",
-      ".agents/skills/web-video-presentation/themes/forest-ink/tokens.css",
-      ".agents/skills/web-video-presentation/themes/indigo-porcelain/theme.json",
-      ".agents/skills/web-video-presentation/themes/indigo-porcelain/tokens.css",
-      ".agents/skills/web-video-presentation/themes/kraft-paper/theme.json",
-      ".agents/skills/web-video-presentation/themes/kraft-paper/tokens.css",
-      ".agents/skills/web-video-presentation/themes/midnight-press/theme.json",
-      ".agents/skills/web-video-presentation/themes/midnight-press/tokens.css",
-      ".agents/skills/web-video-presentation/themes/monochrome-print/theme.json",
-      ".agents/skills/web-video-presentation/themes/monochrome-print/tokens.css",
-      ".agents/skills/web-video-presentation/themes/neon-cyber/theme.json",
-      ".agents/skills/web-video-presentation/themes/neon-cyber/tokens.css",
-      ".agents/skills/web-video-presentation/themes/newsroom/theme.json",
-      ".agents/skills/web-video-presentation/themes/newsroom/tokens.css",
-      ".agents/skills/web-video-presentation/themes/paper-press/theme.json",
-      ".agents/skills/web-video-presentation/themes/paper-press/tokens.css",
-      ".agents/skills/web-video-presentation/themes/pastel-dream/theme.json",
-      ".agents/skills/web-video-presentation/themes/pastel-dream/tokens.css",
-      ".agents/skills/web-video-presentation/themes/split-canvas/theme.json",
-      ".agents/skills/web-video-presentation/themes/split-canvas/tokens.css",
-      ".agents/skills/web-video-presentation/themes/sunset-zine/theme.json",
-      ".agents/skills/web-video-presentation/themes/sunset-zine/tokens.css",
-      ".agents/skills/web-video-presentation/themes/swiss-ikb/theme.json",
-      ".agents/skills/web-video-presentation/themes/swiss-ikb/tokens.css",
-      ".agents/skills/web-video-presentation/themes/terminal-green/theme.json",
-      ".agents/skills/web-video-presentation/themes/terminal-green/tokens.css",
-      ".agents/skills/web-video-presentation/themes/vintage-editorial/theme.json",
-      ".agents/skills/web-video-presentation/themes/vintage-editorial/tokens.css",
-      ".agents/skills/web-video-presentation/themes/warm-keynote/theme.json",
-      ".agents/skills/web-video-presentation/themes/warm-keynote/tokens.css",
       ".dockerignore",
       ".github/audit-exceptions.yml",
       ".github/workflows/backend-ci.yml",
       ".github/workflows/ci-full.yml",
       ".github/workflows/cla.yml",
+      ".github/workflows/publish-reviewed-image.yml",
       ".github/workflows/release.yml",
       ".github/workflows/security-scan.yml",
       ".github/workflows/steadflow-upstream-ci.yml",
@@ -641,37 +361,269 @@
       "tools/upstream-sync/upstream_sync.py"
     ]
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "shared_seams": [
-    ".github/audit-exceptions.yml",
-    ".github/workflows/backend-ci.yml",
-    ".github/workflows/release.yml",
-    ".github/workflows/security-scan.yml",
-    ".gitignore",
-    "DEV_GUIDE.md",
-    "README.md",
-    "README_CN.md",
-    "README_JA.md",
-    "backend/cmd/server/wire_gen.go",
-    "backend/ent/group.go",
-    "backend/go.sum",
-    "backend/internal/handler/handler.go",
-    "backend/internal/handler/wire.go",
-    "backend/internal/server/router.go",
-    "backend/internal/service/setting_parse.go",
-    "backend/internal/service/wire.go",
-    "deploy/.env.example",
-    "deploy/DOCKER.md",
-    "deploy/Dockerfile",
-    "deploy/README.md",
-    "deploy/config.example.yaml",
-    "deploy/docker-compose.dev.yml",
-    "deploy/docker-compose.local.yml",
-    "deploy/docker-compose.standalone.yml",
-    "deploy/docker-compose.yml",
-    "docs/COMPOSITE_GROUPS.md",
-    "frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts",
-    "frontend/src/router/index.ts"
+    {
+      "owner": "integration_adapter",
+      "path": ".github/audit-exceptions.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": ".github/workflows/backend-ci.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": ".github/workflows/release.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": ".github/workflows/security-scan.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": ".gitignore",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "DEV_GUIDE.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "branding_settings",
+      "path": "README.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "branding_settings",
+      "path": "README_CN.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "branding_settings",
+      "path": "README_JA.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/cmd/server/wire_gen.go",
+      "risk": "medium",
+      "strategy": "regenerate",
+      "tests": [
+        "generated_code"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/ent/group.go",
+      "risk": "medium",
+      "strategy": "regenerate",
+      "tests": [
+        "generated_code"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/go.sum",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/internal/handler/handler.go",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/internal/handler/wire.go",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/internal/server/router.go",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "branding_settings",
+      "path": "backend/internal/service/setting_parse.go",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "backend/internal/service/wire.go",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/.env.example",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/DOCKER.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/Dockerfile",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/README.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/config.example.yaml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/docker-compose.dev.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/docker-compose.local.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/docker-compose.standalone.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "deploy/docker-compose.yml",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "docs/COMPOSITE_GROUPS.md",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "frontend/src/router/index.ts",
+      "risk": "high",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression"
+      ]
+    }
   ],
   "thesis_public": {
     "paths": [

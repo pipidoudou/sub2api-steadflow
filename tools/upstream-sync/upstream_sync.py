@@ -41,6 +41,16 @@ UPSTREAM_LOCK_KEYS = frozenset(
 RELEASE_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 OBJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+SEAM_STRATEGIES = frozenset(
+    (
+        "manual",
+        "regenerate",
+        "semantic-resolver",
+        "take-steadflow",
+        "take-upstream",
+    )
+)
+SEAM_RISKS = frozenset(("low", "medium", "high"))
 
 
 class ManifestValidationError(ValueError):
@@ -1426,6 +1436,8 @@ def _validate_repo_paths(field, paths):
             and bool(path)
             and "\\" not in path
             and "\x00" not in path
+            and "\n" not in path
+            and "\r" not in path
             and not path.startswith("/")
             and path != "."
             and "." not in PurePosixPath(path).parts
@@ -1469,6 +1481,59 @@ def _validate_commands(field, commands):
         raise ManifestValidationError(f"{field} names must be sorted and unique")
 
 
+def _shared_seam_entries(manifest):
+    """Return normalized seam policies for manifest schema 1 or 2."""
+    seams = manifest["shared_seams"]
+    if not isinstance(seams, list):
+        raise ManifestValidationError("shared_seams must be a list")
+    if manifest["schema_version"] == 1:
+        _validate_repo_paths("shared_seams", seams)
+        return [
+            {
+                "owner": "shared",
+                "path": path,
+                "risk": "high",
+                "strategy": "manual",
+                "tests": [],
+            }
+            for path in seams
+        ]
+
+    entries = []
+    expected_keys = {"owner", "path", "risk", "strategy", "tests"}
+    for index, seam in enumerate(seams):
+        field = f"shared_seams[{index}]"
+        if not isinstance(seam, dict) or set(seam) != expected_keys:
+            raise ManifestValidationError(
+                f"{field} keys must be owner, path, risk, strategy, and tests"
+            )
+        _validate_repo_paths(f"{field}.path", [seam["path"]])
+        if seam["owner"] not in OWNER_LAYER_KEYS:
+            raise ManifestValidationError(f"{field}.owner must name an owner layer")
+        if seam["strategy"] not in SEAM_STRATEGIES:
+            raise ManifestValidationError(f"{field}.strategy is invalid")
+        if seam["risk"] not in SEAM_RISKS:
+            raise ManifestValidationError(f"{field}.risk is invalid")
+        tests = seam["tests"]
+        if (
+            not isinstance(tests, list)
+            or any(not isinstance(test, str) or not test for test in tests)
+            or tests != sorted(set(tests))
+        ):
+            raise ManifestValidationError(
+                f"{field}.tests must be a sorted unique list of non-empty strings"
+            )
+        entries.append(seam)
+    paths = [entry["path"] for entry in entries]
+    if paths != sorted(set(paths)):
+        raise ManifestValidationError("shared_seams paths must be sorted and unique")
+    return entries
+
+
+def _shared_seam_paths(manifest):
+    return [entry["path"] for entry in _shared_seam_entries(manifest)]
+
+
 def validate_manifest(manifest, changed_paths, *, require_exact=False):
     """Return deterministic ownership details for changed repository paths."""
     actual_keys = set(manifest)
@@ -1480,9 +1545,9 @@ def validate_manifest(manifest, changed_paths, *, require_exact=False):
         )
     if (
         type(manifest["schema_version"]) is not int
-        or manifest["schema_version"] != 1
+        or manifest["schema_version"] not in {1, 2}
     ):
-        raise ManifestValidationError("schema_version must be integer 1")
+        raise ManifestValidationError("schema_version must be integer 1 or 2")
 
     for layer in OWNER_LAYER_KEYS:
         value = manifest[layer]
@@ -1492,8 +1557,8 @@ def validate_manifest(manifest, changed_paths, *, require_exact=False):
             )
         if set(value) != {"paths"}:
             raise ManifestValidationError(f"{layer} keys must be paths")
-    if not isinstance(manifest["shared_seams"], list):
-        raise ManifestValidationError("shared_seams must be a list")
+    seam_entries = _shared_seam_entries(manifest)
+    seam_paths = [entry["path"] for entry in seam_entries]
     generated = manifest["generated"]
     if (
         not isinstance(generated, dict)
@@ -1519,10 +1584,9 @@ def validate_manifest(manifest, changed_paths, *, require_exact=False):
         for path in paths:
             owners_by_path.setdefault(path, []).append(layer)
 
-    _validate_repo_paths("shared_seams", manifest["shared_seams"])
     _validate_repo_paths("generated.paths", manifest["generated"]["paths"])
     for field, paths in (
-        ("shared_seams", manifest["shared_seams"]),
+        ("shared_seams", seam_paths),
         ("generated.paths", manifest["generated"]["paths"]),
     ):
         if paths != sorted(set(paths)):
@@ -1539,7 +1603,7 @@ def validate_manifest(manifest, changed_paths, *, require_exact=False):
             for path in sorted(owners_by_path)
             if len(owners_by_path[path]) > 1
         },
-        "shared_seams": sorted(manifest["shared_seams"]),
+        "shared_seams": seam_paths,
         "generated": sorted(manifest["generated"]["paths"]),
         "registered": sorted(owners_by_path),
     }
@@ -1568,6 +1632,13 @@ def validate_manifest(manifest, changed_paths, *, require_exact=False):
         raise ManifestValidationError(
             "orphan shared_seams: " + ", ".join(orphan_seams)
         )
+    for entry in seam_entries:
+        actual_owner = owners_by_path[entry["path"]][0]
+        if entry["owner"] not in {"shared", actual_owner}:
+            raise ManifestValidationError(
+                f"shared seam owner mismatch: {entry['path']} "
+                f"declares {entry['owner']} but is owned by {actual_owner}"
+            )
     if orphan_generated:
         raise ManifestValidationError(
             "orphan generated paths: " + ", ".join(orphan_generated)
@@ -2495,9 +2566,16 @@ def _reconciled_manifest(repository, state, worktree, source_manifest):
         raise UpgradeBlocked(
             "final candidate has unowned paths: " + ", ".join(unowned)
         )
-    manifest["shared_seams"] = sorted(
-        path for path in manifest["shared_seams"] if path in registered
-    )
+    if manifest["schema_version"] == 1:
+        manifest["shared_seams"] = sorted(
+            path for path in manifest["shared_seams"] if path in registered
+        )
+    else:
+        manifest["shared_seams"] = [
+            entry
+            for entry in manifest["shared_seams"]
+            if entry["path"] in registered
+        ]
     manifest["generated"]["paths"] = sorted(
         path for path in manifest["generated"]["paths"] if path in registered
     )
@@ -3085,7 +3163,7 @@ def _upgrade_audit_context(
     ).stdout.strip()
     if not OBJECT_ID_PATTERN.fullmatch(upstream_tree):
         raise UpgradeBlocked("target upstream tree is invalid")
-    registered_seams = sorted(manifest["shared_seams"])
+    registered_seams = _shared_seam_paths(manifest)
     changed_seams = sorted(
         set(registered_seams).intersection(_summary_paths(upstream_changes))
     )
@@ -3596,6 +3674,95 @@ def _unmerged_paths(repository, worktree):
     return sorted(fields)
 
 
+def _seam_policy_map(manifest):
+    return {entry["path"]: entry for entry in _shared_seam_entries(manifest)}
+
+
+def _checkout_conflict_side(repository, worktree, path, side):
+    completed = repository.run_without_hooks(
+        "checkout", f"--{side}", "--", path, cwd=worktree, check=False
+    )
+    if completed.returncode != 0:
+        raise UpgradeBlocked(f"unable to apply {side} conflict policy for {path}")
+    repository.run_without_hooks("add", "--", path, cwd=worktree)
+
+
+def _rerere_remaining(repository, worktree):
+    completed = repository.run_without_hooks(
+        "-c",
+        "rerere.enabled=true",
+        "-c",
+        "rerere.autoupdate=false",
+        "rerere",
+        "remaining",
+        cwd=worktree,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise UpgradeBlocked("unable to inspect recorded conflict resolutions")
+    paths = completed.stdout.splitlines()
+    try:
+        _validate_repo_paths("rerere remaining paths", paths)
+    except ManifestValidationError as error:
+        raise UpgradeBlocked(str(error)) from error
+    return set(paths)
+
+
+def _run_generated_conflict_resolvers(repository, worktree, manifest, paths):
+    for path in paths:
+        _checkout_conflict_side(repository, worktree, path, "ours")
+    for command in manifest["generated"]["commands"]:
+        cwd = Path(worktree) / command.get("cwd", "")
+        completed = _run_validation_process(repository, command["argv"], cwd)
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise UpgradeBlocked(
+                _redact_diagnostic(
+                    f"generated conflict resolver {command['name']} failed: {detail}"
+                )
+            )
+    repository.run_without_hooks(
+        "add", "--", *manifest["generated"]["paths"], cwd=worktree
+    )
+
+
+def _apply_conflict_strategies(
+    repository, worktree, manifest, *, accept_recorded_semantic=False
+):
+    """Apply only explicit deterministic policies; return unresolved paths."""
+    policies = _seam_policy_map(manifest)
+    for path in _unmerged_paths(repository, worktree):
+        strategy = policies[path]["strategy"]
+        if strategy == "take-upstream":
+            _checkout_conflict_side(repository, worktree, path, "theirs")
+        elif strategy == "take-steadflow":
+            _checkout_conflict_side(repository, worktree, path, "ours")
+
+    remaining = _unmerged_paths(repository, worktree)
+    if accept_recorded_semantic and remaining:
+        rerere_remaining = _rerere_remaining(repository, worktree)
+        reusable = [
+            path
+            for path in remaining
+            if policies[path]["strategy"] == "semantic-resolver"
+            and path not in rerere_remaining
+        ]
+        if reusable:
+            repository.run_without_hooks("add", "--", *reusable, cwd=worktree)
+            remaining = _unmerged_paths(repository, worktree)
+
+    regenerate = [
+        path for path in remaining if policies[path]["strategy"] == "regenerate"
+    ]
+    blocked = [path for path in remaining if path not in regenerate]
+    if regenerate and not blocked:
+        _run_generated_conflict_resolvers(
+            repository, worktree, manifest, regenerate
+        )
+        remaining = _unmerged_paths(repository, worktree)
+    return remaining
+
+
 def _record_merge_conflicts(repository, storage, state, worktree):
     conflict_paths = _unmerged_paths(repository, worktree)
     if not conflict_paths:
@@ -3626,7 +3793,7 @@ def _record_merge_conflicts(repository, storage, state, worktree):
     }
     state["phase"] = "conflicted"
     _write_state(storage, state)
-    unregistered = sorted(set(conflict_paths) - set(manifest["shared_seams"]))
+    unregistered = sorted(set(conflict_paths) - set(_shared_seam_paths(manifest)))
     if unregistered:
         raise UpgradeBlocked(
             "unregistered conflict paths: " + ", ".join(unregistered)
@@ -3667,7 +3834,7 @@ def _require_recorded_conflicts(repository, state, worktree):
         ],
     )
     unregistered = sorted(
-        set(conflicts["paths"]) - set(source_manifest["shared_seams"])
+        set(conflicts["paths"]) - set(_shared_seam_paths(source_manifest))
     )
     if unregistered:
         raise UpgradeBlocked(
@@ -3746,6 +3913,10 @@ def _create_upgrade_candidate_locked(repository, release, storage):
     }
     _write_state(storage, state)
     merge = repository.run_without_hooks(
+        "-c",
+        "rerere.enabled=true",
+        "-c",
+        "rerere.autoupdate=false",
         "merge",
         "--no-ff",
         "--no-edit",
@@ -3755,9 +3926,31 @@ def _create_upgrade_candidate_locked(repository, release, storage):
     )
     if merge.returncode != 0:
         _record_merge_conflicts(repository, storage, state, worktree)
-        raise UpgradeBlocked(
-            f"merge conflict preserved in {worktree}; resolve and run --continue"
+        source_manifest = _source_configuration_documents(
+            repository, state, worktree
+        )["customization"]
+        remaining = _apply_conflict_strategies(
+            repository, worktree, source_manifest
         )
+        if remaining:
+            raise UpgradeBlocked(
+                f"merge conflict preserved in {worktree}; unresolved: "
+                + ", ".join(remaining)
+                + "; review and run --continue"
+            )
+        continued = repository.run_without_hooks(
+            "-c",
+            "rerere.enabled=true",
+            "-c",
+            "rerere.autoupdate=false",
+            "merge",
+            "--continue",
+            cwd=worktree,
+            check=False,
+            extra_environment={"GIT_EDITOR": "true"},
+        )
+        if continued.returncode != 0:
+            raise UpgradeBlocked("automatic conflict continuation failed; candidate preserved")
     candidate_head = repository.run(
         "rev-parse",
         "HEAD",
@@ -3990,7 +4183,15 @@ def _resume_upgrade_locked(repository, storage, *, loaded=None):
             repository, storage, state, worktree
         )
 
-    unmerged = _unmerged_paths(repository, worktree)
+    source_manifest = _source_configuration_documents(
+        repository, state, worktree
+    )["customization"]
+    unmerged = _apply_conflict_strategies(
+        repository,
+        worktree,
+        source_manifest,
+        accept_recorded_semantic=True,
+    )
     if unmerged:
         if state["phase"] == "merging" and "conflicts" not in state:
             _record_merge_conflicts(repository, storage, state, worktree)
@@ -4010,6 +4211,10 @@ def _resume_upgrade_locked(repository, storage, *, loaded=None):
         if merge_head.stdout.strip() != state["peeled_commit"]:
             raise UpgradeBlocked("MERGE_HEAD does not match upgrade target")
         continued = repository.run_without_hooks(
+            "-c",
+            "rerere.enabled=true",
+            "-c",
+            "rerere.autoupdate=false",
             "merge",
             "--continue",
             cwd=worktree,
@@ -4027,6 +4232,10 @@ def _resume_upgrade_locked(repository, storage, *, loaded=None):
         ).stdout.strip()
     elif state["phase"] == "merging" and candidate_head == state["source_commit"]:
         restarted = repository.run_without_hooks(
+            "-c",
+            "rerere.enabled=true",
+            "-c",
+            "rerere.autoupdate=false",
             "merge",
             "--no-ff",
             "--no-edit",
@@ -4036,9 +4245,33 @@ def _resume_upgrade_locked(repository, storage, *, loaded=None):
         )
         if restarted.returncode != 0:
             _record_merge_conflicts(repository, storage, state, worktree)
-            raise UpgradeBlocked(
-                f"merge conflict preserved in {worktree}; resolve and run --continue"
+            source_manifest = _source_configuration_documents(
+                repository, state, worktree
+            )["customization"]
+            remaining = _apply_conflict_strategies(
+                repository, worktree, source_manifest
             )
+            if remaining:
+                raise UpgradeBlocked(
+                    f"merge conflict preserved in {worktree}; unresolved: "
+                    + ", ".join(remaining)
+                    + "; review and run --continue"
+                )
+            continued = repository.run_without_hooks(
+                "-c",
+                "rerere.enabled=true",
+                "-c",
+                "rerere.autoupdate=false",
+                "merge",
+                "--continue",
+                cwd=worktree,
+                check=False,
+                extra_environment={"GIT_EDITOR": "true"},
+            )
+            if continued.returncode != 0:
+                raise UpgradeBlocked(
+                    "automatic conflict continuation failed; candidate preserved"
+                )
         candidate_head = repository.run(
             "rev-parse",
             "HEAD",

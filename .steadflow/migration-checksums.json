@@ -282,5 +282,11 @@
     "backend/migrations/232_group_reasoning_effort_over_limit.sql": "469fd8018b272050de20fde1835699feabc865e2c87d612bff6402821f74a6e8",
     "backend/migrations/233_group_free_openai_fast.sql": "aff8cc2ca0b370a7dca32c21eda22ae8c07d35db5b229e2681faab02e1eac72c"
   },
+  "reviewed_additions": {
+    "backend/migrations/234_channel_max_reasoning_effort_multiplier.sql": {
+      "rationale": "The DROP targets only the newly introduced idempotency constraint before recreating it; it does not remove a column or user data.",
+      "sha256": "448b59b3168fe4dfe2417f1abd9657d124708c279e2245d55149087838d8c8d6"
+    }
+  },
   "schema_version": 1
 }

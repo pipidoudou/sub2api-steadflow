@@ -1694,7 +1694,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertEqual(
             set(baseline),
             {"algorithm", "migrations", "schema_version"}
-            | ({"reviewed_additions"} if release == "v0.1.178" else set()),
+            | ({"reviewed_additions"} if "reviewed_additions" in baseline else set()),
         )
         self.assertEqual(baseline["schema_version"], 1)
         self.assertEqual(baseline["algorithm"], "sha256")
@@ -1707,7 +1707,9 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertEqual(list(baseline["migrations"]), sorted(baseline["migrations"]))
         self.assertEqual(baseline["migrations"], independently_hashed)
         self.assertEqual(baseline["migrations"], migration_checksums(REPO_ROOT))
-        expected_count = {"v0.1.178": 268, "v0.2.0": 280}[release]
+        expected_count = {"v0.1.178": 268, "v0.2.0": 280, "v0.2.1": 284}[
+            release
+        ]
         self.assertEqual(len(baseline["migrations"]), expected_count)
         if release == "v0.1.178":
             self.assertEqual(
@@ -1716,6 +1718,24 @@ class RepositoryBaselineTests(unittest.TestCase):
                 ["sha256"],
                 "21d81a064828e8a544992f98e949053e45e9a135bc011f129147675d94612ddf",
             )
+        elif release == "v0.2.0":
+            self.assertEqual(
+                baseline.get("reviewed_additions"),
+                {
+                    "backend/migrations/234_channel_max_reasoning_effort_multiplier.sql": {
+                        "rationale": (
+                            "The DROP targets only the newly introduced idempotency "
+                            "constraint before recreating it; it does not remove a column "
+                            "or user data."
+                        ),
+                        "sha256": (
+                            "448b59b3168fe4dfe2417f1abd9657d124708c279e2245d55149087838d8c8d6"
+                        ),
+                    }
+                },
+            )
+        else:
+            self.assertNotIn("reviewed_additions", baseline)
         report = validate_migrations(REPO_ROOT, baseline)
         self.assertEqual(len(report["unchanged"]), expected_count)
         self.assertEqual(report["changed"], [])

@@ -321,6 +321,9 @@ describe('PaymentView recharge rate preview', () => {
       },
     })
     await flushPromises()
+    const rechargeTab = wrapper.findAll('button').find((button) => button.text() === 'payment.tabTopUp')
+    expect(rechargeTab).toBeDefined()
+    await rechargeTab!.trigger('click')
     wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 10)
     await flushPromises()
 

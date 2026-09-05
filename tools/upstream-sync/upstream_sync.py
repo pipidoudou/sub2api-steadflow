@@ -3500,6 +3500,9 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
                 go_results,
                 vitest_results,
             )
+            advanced_paths = _configuration_paths(GitRepository(worktree))
+            advanced_manifest = load_json_document(advanced_paths["customization"])
+            report["generated"]["paths"] = advanced_manifest["generated"]["paths"]
         candidate_head, candidate_tree, _, configuration_hashes = _candidate_binding(
             repository, worktree
         )

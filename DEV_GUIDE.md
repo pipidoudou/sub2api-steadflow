@@ -34,8 +34,8 @@
 ### 开发工具
 
 ```bash
-# golangci-lint v2.7
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7
+# golangci-lint（CI 用 v2.13，本地建议装同一版以免版本差异带来的噪音）
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13
 
 # pnpm (前端包管理)
 npm install -g pnpm
@@ -47,14 +47,13 @@ npm install -g pnpm
 
 | Workflow | 触发条件 | 检查内容 |
 |----------|----------|----------|
-| **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.7 |
-| **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
+| **backend-ci.yml** | push 到 `main`（排除 `v*` tag） | 后端单元测试 + 前端关键测试 + golangci-lint v2.13 |
+| **security-scan.yml** | 每周一、手动触发 | govulncheck + pnpm audit |
 | **steadflow-upstream-ci.yml** | pull_request, workflow_dispatch | 上游契约、生成代码、后端关键包、Steadflow critical、完整前端与 Docker build |
-| **release.yml** | tag `v*` | 构建发布（PR 不触发） |
 
 ### CI 要求
 
-- Go 版本以 `backend/go.mod` 为准，不在文档或 workflow 中硬编码补丁版本
+- Go 版本必须是 **1.27.0**：workflow 使用 `backend/go.mod` 取版本，并在 `backend-ci.yml` 与 `security-scan.yml` 中硬断言补丁版本。升级 Go 时要同步修改 `backend/go.mod`、这些 workflow 的断言、根 `Dockerfile` 与 `backend/Dockerfile` 的构建镜像。
 - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
 - Steadflow 上游候选流程见 [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md)
 
@@ -205,7 +204,7 @@ go test -tags=integration ./...
 **解决**：
 ```bash
 cd backend
-go generate ./ent  # 重新生成 ent 代码
+go generate ./ent  # 重新生成 ent 代码（json.RawMessage 字段会生成为同类型的 jsontext.Value，属预期）
 git add ent/       # 生成的文件也要提交
 ```
 

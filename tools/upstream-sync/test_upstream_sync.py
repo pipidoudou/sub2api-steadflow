@@ -2917,6 +2917,7 @@ class HermeticUpgradeFixture:
             " (dist/'index.html').write_text('built\\n')\n"
             " (dist/'assets'/'app.js').write_text('built\\n')\n"
             " sys.exit(0)\n"
+            "if 'install' in sys.argv and '--frozen-lockfile' in sys.argv: sys.exit(0)\n"
             "if 'vitest' in sys.argv:\n"
             " print(json.dumps({'success':True,'testResults':[{'name':str(root/'frontend'/'src'/'fixture.spec.ts'),'assertionResults':[{'fullName':'fixture passes','status':'passed'}]}]}))\n"
             " sys.exit(0)\n"
@@ -3729,16 +3730,20 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
 
         self.assertEqual(
             [cwd for _, cwd in calls],
-            [worktree / "backend", worktree, worktree, worktree / "backend", worktree],
+            [worktree, worktree / "backend", worktree, worktree, worktree / "backend", worktree],
         )
-        self.assertEqual(calls[0][0], ["go", "test", "-json", "./..."])
-        self.assertIn("vitest", calls[1][0])
-        self.assertEqual(calls[2][0], ["pnpm", "--dir", "frontend", "run", "build"])
         self.assertEqual(
-            calls[3][0][:3],
+            calls[0][0],
+            ["pnpm", "--dir", "frontend", "install", "--frozen-lockfile"],
+        )
+        self.assertEqual(calls[1][0], ["go", "test", "-json", "./..."])
+        self.assertIn("vitest", calls[2][0])
+        self.assertEqual(calls[3][0], ["pnpm", "--dir", "frontend", "run", "build"])
+        self.assertEqual(
+            calls[4][0][:3],
             ["go", "test", "-json"],
         )
-        self.assertEqual(calls[4][0], ["make", "-C", "backend", "generate"])
+        self.assertEqual(calls[5][0], ["make", "-C", "backend", "generate"])
         report = json.loads(self.report_path().read_text(encoding="utf-8"))
         candidate_head = self.fixture.run_git(
             "rev-parse", "HEAD", root=worktree
@@ -4223,19 +4228,23 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
             resume_upgrade(repository)
 
     def assert_complete_validation_calls(self, calls, critical_count=1):
-        self.assertEqual(calls[0], ["go", "test", "-json", "./..."])
-        self.assertIn("vitest", calls[1])
-        self.assertEqual(calls[2], ["pnpm", "--dir", "frontend", "run", "build"])
-        critical = calls[3 : 3 + critical_count]
+        self.assertEqual(
+            calls[0],
+            ["pnpm", "--dir", "frontend", "install", "--frozen-lockfile"],
+        )
+        self.assertEqual(calls[1], ["go", "test", "-json", "./..."])
+        self.assertIn("vitest", calls[2])
+        self.assertEqual(calls[3], ["pnpm", "--dir", "frontend", "run", "build"])
+        critical = calls[4 : 4 + critical_count]
         self.assertEqual(len(critical), critical_count)
         for index, argv in enumerate(critical, 1):
             self.assertEqual(argv[:3], ["go", "test", "-json"])
             if critical_count == 6:
                 self.assertIn(f"./fixture/{index}", argv)
         self.assertEqual(
-            calls[3 + critical_count], ["make", "-C", "backend", "generate"]
+            calls[4 + critical_count], ["make", "-C", "backend", "generate"]
         )
-        self.assertEqual(len(calls), 4 + critical_count)
+        self.assertEqual(len(calls), 5 + critical_count)
 
     def test_validating_phase_report_commit_still_reruns_every_gate(self):
         repository = self.fixture.repository()

@@ -3374,6 +3374,22 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
         migrations = validate_migrations(worktree, baseline)
         report["migrations"] = {"status": "PASS", **migrations}
 
+        install_completed = _run_validation_process(
+            repository,
+            ["pnpm", "--dir", "frontend", "install", "--frozen-lockfile"],
+            worktree,
+        )
+        if install_completed.returncode != 0:
+            raise UpgradeBlocked(
+                _redact_diagnostic(
+                    "frozen frontend dependency install failed: "
+                    + (
+                        install_completed.stderr.strip()
+                        or install_completed.stdout.strip()
+                    )
+                )
+            )
+
         go_completed = _run_validation_process(
             repository, ["go", "test", "-json", "./..."], Path(worktree) / "backend"
         )

@@ -72,7 +72,7 @@ cat "$(git rev-parse --git-common-dir)/steadflow-upstream-sync/state.json"
 
 ## 4. 报告、PR 与不可变标签
 
-候选验证完成后，检查 JSON/Markdown 完整报告、候选 commit/tree、官方 tag/commit、生成代码、迁移、known failures、关键命令和完整测试结果。然后由人工把 `upgrade/vX.Y.Z` 推到 fork 并创建 PR；PR 以 `.github/workflows/steadflow-upstream-ci.yml` 的只读结果为合并门槛。同步工具自身的 6000+ 用例仅在 `tools/upstream-sync/**` 或其 CI 定义变化时运行；普通上游版本候选仍执行完整产品回归，但不会重复测试同步工具实现。
+候选验证会先在隔离 worktree 内执行 `pnpm install --frozen-lockfile`，再运行完整产品回归，避免依赖主工作树的 `node_modules`。验证完成后，检查 JSON/Markdown 完整报告、候选 commit/tree、官方 tag/commit、生成代码、迁移、known failures、关键命令和完整测试结果。然后由人工把 `upgrade/vX.Y.Z` 推到 fork 并创建 PR；PR 以 `.github/workflows/steadflow-upstream-ci.yml` 的只读结果为合并门槛。同步工具自身的完整用例仅在 `tools/upstream-sync/**` 或其 CI 定义变化时运行；普通上游版本候选仍执行完整产品回归，但不会重复测试同步工具实现。
 
 合并必须保留当前 Steadflow 祖先和官方 release 祖先，禁止 squash 或 rebase 成单祖先历史。合并通过且经人工批准后，在 fork `main` 的精确合并 commit 上创建不可变标签：
 

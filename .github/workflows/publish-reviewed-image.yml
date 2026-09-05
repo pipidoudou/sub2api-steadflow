@@ -29,6 +29,8 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Configure read-only official upstream
+        run: git remote add upstream https://github.com/Wei-Shaw/sub2api.git
       - id: source
         name: Bind immutable reviewed tag
         shell: bash

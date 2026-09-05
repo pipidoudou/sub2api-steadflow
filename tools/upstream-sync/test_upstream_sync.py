@@ -1423,6 +1423,14 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertIn("reviewed_tag:", workflow)
         self.assertIn('git cat-file -t "$tag_object"', workflow)
         self.assertIn('git rev-parse "$tag_ref^{}"', workflow)
+        self.assertIn(
+            "git remote add upstream https://github.com/Wei-Shaw/sub2api.git",
+            workflow,
+        )
+        self.assertLess(
+            workflow.index("git remote add upstream"),
+            workflow.index("./tools/upstream-sync/upgrade --verify-current"),
+        )
         self.assertIn(":source-${{ steps.source.outputs.commit }}", workflow)
         self.assertNotIn(":source-${{ github.sha }}", workflow)
 

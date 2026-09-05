@@ -1,15 +1,15 @@
 {
   "baseline": {
     "commands": [
-      "cd backend && go test -json ./... > ../.steadflow/work/v0.1.178-go-test.jsonl",
-      "pnpm --dir frontend exec vitest run --reporter=json --outputFile=../.steadflow/work/v0.1.178-vitest.json"
+      "cd backend && go test -json ./... > ../.steadflow/work/v0.2.0-go-test.jsonl",
+      "pnpm --dir frontend exec vitest run --reporter=json --outputFile=../.steadflow/work/v0.2.0-vitest.json"
     ],
     "evidence": {
-      "go_json_sha256": "9889e37c20a29ad4c462ee59cd086260e5b4e40c373bea14386961325d251406",
-      "vitest_json_sha256": "a71c183c8d8ee42024b15fce7bac2f85bf9eba0e8acde6abb759b2f7d5c7aaba"
+      "go_json_sha256": "c0bc2ca1d927739f6a77c3e77fd712926317fda0681b04f2922f3d3f2ed81f25",
+      "vitest_json_sha256": "64c9ebf92409b609e4bfcd59f95850b3229ab50371cab29f23810d3611584c7a"
     },
-    "historical_observation": "An earlier count of 12 failures was not reproducible in the certified v0.1.178 environment. The certified run had zero failures; this does not prove that each historical failure was fixed upstream.",
-    "release": "v0.1.178",
+    "historical_observation": "Certified v0.2.0 full Go and Vitest run; exact allowed failures, if any, remain governed by entries.",
+    "release": "v0.2.0",
     "result": {
       "failed": 0,
       "go_failed": 0,

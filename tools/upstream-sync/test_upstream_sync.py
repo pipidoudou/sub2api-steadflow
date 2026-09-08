@@ -143,6 +143,7 @@ from upstream_sync import (
     validate_known_failures,
     validate_manifest,
     validate_migrations,
+    verify_current,
     write_upgrade_reports,
 )
 
@@ -3610,6 +3611,102 @@ class UpgradeCleanMergeTests(unittest.TestCase):
         self.assertFalse(pre_commit_marker.exists())
         self.assertFalse(commit_message_marker.exists())
         self.assertFalse(post_commit_marker.exists())
+
+
+
+class ReviewedTestOwnershipTests(unittest.TestCase):
+    test_path = "frontend/src/views/__tests__/reviewed.spec.ts"
+
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.repository = self.fixture.repository()
+        self.fixture.add_release("v1.1.0")
+        runner = self.repository.validation_runner
+        self.repository.validation_runner = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr="stop before validation for registration fixture"
+        )
+        with self.assertRaises(UpgradeBlocked):
+            create_upgrade_candidate(self.repository, "v1.1.0")
+        self.repository.validation_runner = runner
+        self.state = self.fixture.read_state()
+        self.worktree = Path(self.state["worktree"])
+        self.manifest_path = self.worktree / ".steadflow/customization.yml"
+        self.source_manifest = json.loads(self.manifest_path.read_text())
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def register(self, *, path=None, mutate=None, commit=True):
+        path = path or self.test_path
+        target = self.worktree / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("// reviewed test fixture\n")
+        manifest = json.loads(json.dumps(self.source_manifest))
+        manifest["integration_adapter"]["paths"].append(path)
+        manifest["integration_adapter"]["paths"].sort()
+        if mutate:
+            mutate(manifest)
+        self.manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        if commit:
+            self.fixture.run_git("add", path, ".steadflow/customization.yml", root=self.worktree)
+            self.fixture.run_git("commit", "-m", "review: register exact frontend test fixture", root=self.worktree)
+
+    def test_registration_resume_final_baseline_and_state_free_verification(self):
+        self.register()
+        registration = self.fixture.run_git("rev-parse", "HEAD", root=self.worktree).stdout.strip()
+        completed = resume_upgrade(self.repository)
+        self.assertEqual(completed["phase"], "merged")
+        self.assertEqual(completed["source_commit"], self.state["source_commit"])
+        self.assertEqual(json.loads((self.fixture.fork / ".steadflow/customization.yml").read_text()), self.source_manifest)
+        self.assertIn(self.test_path, json.loads(self.manifest_path.read_text())["integration_adapter"]["paths"])
+        self.fixture.run_git("merge-base", "--is-ancestor", registration, "HEAD", root=self.worktree)
+        self.assertEqual(verify_current(GitRepository(self.worktree))["lock"]["release"], "v1.1.0")
+        self.assertEqual(resume_upgrade(self.repository)["evidence"], completed["evidence"])
+
+    def test_registration_survives_partial_baseline_write_recovery(self):
+        self.register()
+        def crash(event, **kwargs):
+            if event == "after_baseline_files":
+                raise UpgradeBlocked("registration fixture baseline interruption")
+        self.repository.upgrade_test_hook = crash
+        with self.assertRaisesRegex(UpgradeBlocked, "baseline interruption"):
+            resume_upgrade(self.repository)
+        self.repository.upgrade_test_hook = lambda *args, **kwargs: None
+        self.assertEqual(resume_upgrade(self.repository)["phase"], "merged")
+        self.assertIn(self.test_path, json.loads(self.manifest_path.read_text())["integration_adapter"]["paths"])
+
+    def test_registration_rejects_runtime_path(self):
+        self.register(path="frontend/src/views/reviewed.ts")
+        with self.assertRaisesRegex(UpgradeBlocked, "limited to frontend test fixtures"):
+            resume_upgrade(self.repository)
+
+    def test_registration_rejects_protected_manifest_change(self):
+        self.register(mutate=lambda manifest: manifest["critical_commands"].clear())
+        with self.assertRaisesRegex(UpgradeBlocked, "non-additive ownership"):
+            resume_upgrade(self.repository)
+
+    def test_registration_rejects_protected_configuration_change(self):
+        known = self.worktree / ".steadflow/known-failures.yml"
+        document = json.loads(known.read_text())
+        document["baseline"]["historical_observation"] = "unreviewed replacement"
+        known.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+        self.fixture.run_git("add", ".steadflow/known-failures.yml", root=self.worktree)
+        self.register()
+        with self.assertRaisesRegex(UpgradeBlocked, "protected source configuration"):
+            resume_upgrade(self.repository)
+
+    def test_registration_rejects_changed_approved_test_blob(self):
+        self.register()
+        (self.worktree / self.test_path).write_text("// changed after review\n")
+        self.fixture.run_git("add", self.test_path, root=self.worktree)
+        self.fixture.run_git("commit", "-m", "unreviewed later test change", root=self.worktree)
+        with self.assertRaisesRegex(UpgradeBlocked, "registered test blob changed"):
+            resume_upgrade(self.repository)
+
+    def test_registration_rejects_uncommitted_manifest(self):
+        self.register(commit=False)
+        with self.assertRaises(UpgradeBlocked):
+            resume_upgrade(self.repository)
 
 
 class UpgradeCandidateValidationTests(unittest.TestCase):

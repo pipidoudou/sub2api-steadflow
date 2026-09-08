@@ -2707,8 +2707,87 @@ def _source_configuration_documents(repository, state, worktree):
     }
 
 
+
+def _reviewed_test_ownership_manifest(repository, state, worktree):
+    """Apply only committed, blob-bound frontend test ownership additions."""
+    source = _source_configuration_documents(repository, state, worktree)
+    manifest = source["customization"]
+    paths = _configuration_paths(GitRepository(worktree))
+    current = load_json_document(paths["customization"])
+    validate_manifest(current, [])
+    original = set(manifest["integration_adapter"]["paths"])
+    additions = set(current["integration_adapter"]["paths"]) - original - set(
+        _validation_report_relative_paths(state["release"])
+    )
+    if not additions:
+        return manifest
+    pattern = re.compile(r"^frontend/src/(?:[^/]+/)*__tests__/[^/]+\.spec\.ts$")
+    for path in sorted(additions):
+        _validate_repo_paths("reviewed test ownership", [path])
+        if not pattern.fullmatch(path):
+            raise UpgradeBlocked("ownership registration is limited to frontend test fixtures")
+    head = repository.run("rev-parse", "HEAD", cwd=worktree, read_only=True).stdout.strip()
+    changed = set(_summary_paths(_git_change_summary(
+        repository, state["peeled_commit"], head, worktree
+    )))
+    if not additions.issubset(changed):
+        raise UpgradeBlocked("registered test must differ from the target upstream tree")
+    commits = repository.run(
+        "log", "--reverse", "--format=%H", f"{state['source_commit']}..{head}",
+        "--", BASELINE_CONFIGURATION_PATHS["customization"],
+        cwd=worktree, read_only=True,
+    ).stdout.splitlines()
+    remaining = set(additions)
+    for commit in commits:
+        recorded = _load_json_bytes(repository.read_blob_bytes(
+            commit, BASELINE_CONFIGURATION_PATHS["customization"], cwd=worktree
+        ), "test ownership registration")
+        validate_manifest(recorded, [])
+        recorded_paths = set(recorded["integration_adapter"]["paths"])
+        introduced = remaining & recorded_paths
+        if not introduced:
+            continue
+        registered = recorded_paths - original
+        expected = json.loads(json.dumps(manifest))
+        expected["integration_adapter"]["paths"] = sorted(original | registered)
+        if recorded != expected or any(not pattern.fullmatch(path) for path in registered):
+            raise UpgradeBlocked("test registration changed non-additive ownership configuration")
+        for name, relative in BASELINE_CONFIGURATION_PATHS.items():
+            if name != "customization" and repository.read_blob_bytes(
+                commit, relative, cwd=worktree
+            ) != repository.read_blob_bytes(state["source_commit"], relative, cwd=worktree):
+                raise UpgradeBlocked("test registration changed protected source configuration")
+        for path in introduced:
+            approved = _tree_regular_file(repository, commit, path, worktree)
+            actual = _tree_regular_file(repository, head, path, worktree)
+            if approved is None or approved[0] != "100644" or actual != approved:
+                raise UpgradeBlocked(f"registered test blob changed or is unsafe: {path}")
+        remaining -= introduced
+        if not remaining:
+            break
+    if remaining:
+        raise UpgradeBlocked("test ownership addition has no committed registration")
+    overlay = json.loads(json.dumps(manifest))
+    overlay["integration_adapter"]["paths"] = sorted(original | additions)
+    validate_manifest(overlay, [
+        path for layer in OWNER_LAYER_KEYS for path in overlay[layer]["paths"]
+    ])
+    return overlay
+
+
+def _candidate_source_configuration_hashes(repository, state, worktree):
+    hashes = _source_configuration_hashes(repository, state["source_commit"], worktree)
+    source_manifest = _source_configuration_documents(repository, state, worktree)["customization"]
+    overlay = _reviewed_test_ownership_manifest(repository, state, worktree)
+    if overlay != source_manifest:
+        hashes["customization"] = hashlib.sha256(_canonical_json_bytes(overlay)).hexdigest()
+    return hashes
+
+
 def _reconciled_manifest(repository, state, worktree, source_manifest):
     manifest = json.loads(json.dumps(source_manifest))
+    overlay = _reviewed_test_ownership_manifest(repository, state, worktree)
+    manifest["integration_adapter"]["paths"] = overlay["integration_adapter"]["paths"]
     report_paths = set(_validation_report_relative_paths(state["release"]))
     current_changes = _git_change_summary(
         repository,
@@ -2950,6 +3029,12 @@ def _validate_advanced_baseline(repository, state, worktree):
     expected_paths = set(_summary_paths(changes)) | set(
         _validation_report_relative_paths(state["release"])
     )
+    source_manifest = _source_configuration_documents(repository, state, worktree)["customization"]
+    overlay = _reviewed_test_ownership_manifest(repository, state, worktree)
+    if overlay != source_manifest and manifest != _reconciled_manifest(
+        repository, state, worktree, source_manifest
+    ):
+        raise UpgradeBlocked("registered test baseline changed protected ownership configuration")
     ownership = validate_manifest(manifest, sorted(expected_paths), require_exact=True)
     return {
         "changed": sorted(expected_paths),
@@ -3302,8 +3387,8 @@ def _upgrade_audit_context(
     candidate_configuration_hashes = {
         name: _raw_sha256(path) for name, path in sorted(candidate_paths.items())
     }
-    if require_source_configuration and candidate_configuration_hashes != _source_configuration_hashes(
-        repository, state["source_commit"], worktree
+    if require_source_configuration and candidate_configuration_hashes != _candidate_source_configuration_hashes(
+        repository, state, worktree
     ):
         raise UpgradeBlocked("candidate configuration differs from source commit")
     for ancestor, descendant, label in (
@@ -3520,8 +3605,8 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
         current_hashes = {
             name: _raw_sha256(path) for name, path in sorted(paths.items())
         }
-        source_hashes = _source_configuration_hashes(
-            repository, state["source_commit"], worktree
+        source_hashes = _candidate_source_configuration_hashes(
+            repository, state, worktree
         )
         baseline_already_advanced = current_hashes != source_hashes
         if baseline_already_advanced:
@@ -3737,7 +3822,7 @@ def _recover_incomplete_baseline(repository, storage, state, worktree):
     ).stdout.strip()
     expected_hashes = pending["configuration_hashes"]
     source_hashes = _source_configuration_hashes(
-        repository, state["source_commit"], worktree
+        repository, pending["pre_head"], worktree
     )
     current_paths = _configuration_paths(GitRepository(worktree))
     current_hashes = {
@@ -3762,7 +3847,7 @@ def _recover_incomplete_baseline(repository, storage, state, worktree):
             )
         for name, relative_path in sorted(BASELINE_CONFIGURATION_PATHS.items()):
             content = repository.read_blob_bytes(
-                state["source_commit"], relative_path, cwd=worktree
+                pending["pre_head"], relative_path, cwd=worktree
             )
             _atomic_write_configuration(
                 worktree, PurePosixPath(relative_path).name, content
@@ -4022,7 +4107,10 @@ def _require_recorded_conflicts(repository, state, worktree):
     if _raw_sha256(paths["customization"]) != conflicts["customization_sha256"]:
         if state["phase"] != "validating":
             raise UpgradeBlocked("customization changed after merge conflict capture")
-        _validate_advanced_baseline(repository, state, worktree)
+        expected = _candidate_source_configuration_hashes(repository, state, worktree)
+        current = {name: _raw_sha256(path) for name, path in sorted(paths.items())}
+        if current != expected:
+            _validate_advanced_baseline(repository, state, worktree)
     validate_manifest(
         source_manifest,
         [

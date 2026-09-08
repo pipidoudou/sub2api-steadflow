@@ -60,6 +60,19 @@ cat "$(git rev-parse --git-common-dir)/steadflow-upstream-sync/state.json"
 
 状态中的 `phase` 为 `merging`/`conflicted` 时处理已登记冲突后运行 `--continue`；`validating` 时直接运行 `--continue` 复用现有候选；`merged` 时核对候选 HEAD、clean worktree 和两份报告。报告或候选现场必须保留，不能用重新执行真实业务或连续重试代替诊断。
 
+### 验证期间补充测试文件归属
+
+上游测试 fixture 需要修正而该文件尚未登记为 fork 定制时，可以在候选的 `.steadflow/customization.yml` 中，仅向 `integration_adapter.paths` 单调追加对应 `frontend/src/**/__tests__/*.spec.ts` 路径。将测试最终内容和这份明确的归属登记一起审查并提交；原有路径、其他层、shared seams、生成命令、关键测试、known failures、迁移和 upstream lock 必须保持原 source 配置。此入口不支持生产代码归属扩展，也不会自动登记其他文件。
+
+工具从 Git 历史核对首次引入该清单路径的登记提交，绑定该提交中普通 `100644` 测试文件的 blob；登记后再改变测试内容、修改受保护配置、留下未提交的登记或登记与上游没有差异的文件，都会阻断。原 `source_commit` 和冲突记录不变；登记只用于候选归属协调，最终报告已有的 commit/tree/configuration hashes 覆盖最终清单。自动推进 baseline 及中断恢复会保留已核对的登记，`--verify-current` 仍只依据当前 Git 和契约文件，不依赖本机 state。
+
+若登记支持代码在本次候选中，保持原 source checkout 为工作目录，并显式调用候选工具，以免运行 source 中的旧工具：
+
+```bash
+cd <原source_checkout>
+<候选绝对路径>/tools/upstream-sync/upgrade --continue
+```
+
 ### 已被正式版本取代的过期状态
 
 若旧运行停在冲突或验证阶段，但后续正式版本已经包含旧运行的 Steadflow source 和官方 release 两条祖先，可显式结束旧状态。先根据已审核的不可变注释标签核对完整 commit SHA，再运行：
@@ -95,6 +108,6 @@ steadflow-vX.Y.Z-rN
 
 同一上游版本的修订递增 `rN`。绝不移动、覆盖或复用旧 tag。合并后再次运行 `./tools/upstream-sync/upgrade --continue` 可在确认候选已成为当前分支祖先后归档完成状态。
 
-不可变 tag 触发 `.github/workflows/publish-reviewed-image.yml`，只做轻量源码身份验证并构建一次镜像，发布 `source-<steadflow_commit>` tag 和 provenance attestation。对于工作流建立前已经审核的 tag，可以通过 `workflow_dispatch` 指定精确 `steadflow-v*-r*` tag 回填同一不可变镜像；工作流会重新核对 tag 与检出提交的绑定。`china-models` 后续只允许验证并晋级该精确镜像，不再重新构建 console。
+不可变 tag 触发 `.github/workflows/publish-reviewed-image.yml`，只做轻量源码身份验证并构建一次镜像，发布 `source-<steadflow_commit>` tag 和 provenance attestation。对于工作流建立前已经审核的 tag，手工回填必须让 workflow 的运行 ref 和 `reviewed_tag` 同时指向精确不可变标签：`gh workflow run publish-reviewed-image.yml --ref "$STEADFLOW_TAG" -f reviewed_tag="$STEADFLOW_TAG"`。不能在 main ref 发起 dispatch 后只 checkout 标签，否则 OIDC provenance 的 source SHA 与实际构建 commit 不同，下游 `--source-digest` 校验会拒绝；正常 tag push 发布不受影响。工作流仍会重新核对 tag 与检出提交的绑定。`china-models` 后续只允许验证并晋级该精确镜像，不再重新构建 console。
 
 到此只完成 fork 发布证据。`china-models` 的 console subtree 同步、镜像发布和生产部署属于后续独立流程；任何部署仍需 Plan 2 的单独人工批准。

@@ -447,7 +447,8 @@ func (s *DistributorOrderService) notifyBFFWebhook(
 // BFF verifyHmac 对应此格式：`sha256=<lowercase-hex>`。
 func SignWebhookPayload(secret, body []byte) string {
 	mac := hmac.New(sha256.New, secret)
-	mac.Write(body)
+	// hash.Hash.Write always consumes the full input and never returns an error.
+	_, _ = mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 

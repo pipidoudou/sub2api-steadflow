@@ -313,7 +313,7 @@ func TestIssueApiKey_NewUser_CreatesSingleActive(t *testing.T) {
 	}
 	// 30 天硬过期：与生产代码一致
 	expectedDelta := 30 * 24 * time.Hour
-	actualDelta := keys[0].ExpiresAt.Sub(time.Now())
+	actualDelta := time.Until(*keys[0].ExpiresAt)
 	if actualDelta < expectedDelta-time.Minute || actualDelta > expectedDelta+time.Minute {
 		t.Fatalf("expires_at delta from now = %v, expected ~%v", actualDelta, expectedDelta)
 	}

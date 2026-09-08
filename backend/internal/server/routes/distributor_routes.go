@@ -3,8 +3,8 @@ package routes
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/gin-gonic/gin"
 )
 
 // RegisterDistributorRoutes 注册分销商端点（v2.2 §4.3.1）。

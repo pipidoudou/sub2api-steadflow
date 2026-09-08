@@ -12,7 +12,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -268,10 +267,4 @@ func generateAPIKeyPlaintext() string {
 		return "sk-fallback-" + strings.Repeat("0", 32)
 	}
 	return "sk-" + hex.EncodeToString(b)
-}
-
-// sha256Hash 辅助函数（用于日志脱敏）。
-func sha256Hash(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:8])
 }

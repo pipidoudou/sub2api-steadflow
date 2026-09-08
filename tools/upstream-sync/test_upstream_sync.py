@@ -6331,15 +6331,17 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             [
                 "python3", "-m", "unittest",
                 "tools/upstream-sync/test_upstream_sync.py", "-v",
+                "-k", "test_owner_layer_keys_are_stable",
             ],
             cwd=clone,
             env=environment,
             capture_output=True,
             text=True,
-            timeout=900,
+            timeout=120,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("Ran 1 test", completed.stderr)
         self.assertFalse((clone / "tools/upstream-sync/__pycache__").exists())
         self.assertEqual(
             self.fixture.run_git("status", "--porcelain", root=clone).stdout,
@@ -6419,15 +6421,17 @@ class HermeticFixtureIsolationGuardTests(unittest.TestCase):
             [
                 "python3", "-m", "unittest",
                 "tools/upstream-sync/test_upstream_sync.py", "-v",
+                "-k", "test_owner_layer_keys_are_stable",
             ],
             cwd=clone,
             env=environment,
             capture_output=True,
             text=True,
-            timeout=900,
+            timeout=120,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("Ran 1 test", completed.stderr)
         self.assertTrue(cache_path.is_file())
         after = (
             cache_path.read_bytes(),

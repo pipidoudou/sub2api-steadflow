@@ -4112,7 +4112,7 @@ def _require_recorded_conflicts(repository, state, worktree):
     )["customization"]
     paths = _configuration_paths(GitRepository(worktree))
     if _raw_sha256(paths["customization"]) != conflicts["customization_sha256"]:
-        if state["phase"] != "validating":
+        if state["phase"] not in {"validating", "merged"}:
             raise UpgradeBlocked("customization changed after merge conflict capture")
         expected = _candidate_source_configuration_hashes(repository, state, worktree)
         current = {name: _raw_sha256(path) for name, path in sorted(paths.items())}

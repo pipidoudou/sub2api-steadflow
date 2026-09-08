@@ -4894,6 +4894,49 @@ class UpgradeConflictContinueTests(unittest.TestCase):
 
         self.assertEqual(resumed["phase"], "merged")
 
+    def test_completed_conflict_with_registered_test_archives_after_source_fast_forward(self):
+        worktree = self.start_conflict()
+        (worktree / "shared.txt").write_text("reviewed conflict resolution\n")
+        self.fixture.run_git("add", "shared.txt", root=worktree)
+        repository = self.fixture.repository()
+        repository.validation_runner = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr="fixture pause for reviewed test registration"
+        )
+        with self.assertRaises(UpgradeBlocked):
+            resume_upgrade(repository)
+        paused = self.fixture.read_state()
+        self.assertEqual(paused["phase"], "validating")
+        self.assertEqual(paused["conflicts"]["paths"], ["shared.txt"])
+        test_path = "frontend/src/views/__tests__/reviewed.spec.ts"
+        target = worktree / test_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("// reviewed conflict regression fixture\n")
+        manifest_path = worktree / ".steadflow/customization.yml"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["integration_adapter"]["paths"].append(test_path)
+        manifest["integration_adapter"]["paths"].sort()
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        self.fixture.run_git("add", test_path, ".steadflow/customization.yml", root=worktree)
+        self.fixture.run_git("commit", "-m", "review: register conflict regression test", root=worktree)
+        repository.validation_runner = self.fixture.validation_runner
+        merged = resume_upgrade(repository)
+        self.assertEqual(merged["phase"], "merged")
+        self.assertEqual(merged["conflicts"], paused["conflicts"])
+        self.assertIn(test_path, json.loads(manifest_path.read_text())["integration_adapter"]["paths"])
+        evidence_before = self.fixture.state_path.read_bytes()
+        candidate_head = merged["evidence"]["candidate_head"]
+        self.fixture.run_git("merge", "--ff-only", merged["branch"], root=self.fixture.fork)
+
+        archived = resume_upgrade(repository)
+
+        self.assertTrue(archived["_completed"])
+        self.assertEqual(archived["evidence"], merged["evidence"])
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertEqual(self.fixture.completed_state_path(self.release).read_bytes(), evidence_before)
+        self.assertTrue(worktree.is_dir())
+        for root in (self.fixture.fork, worktree):
+            self.assertEqual(self.fixture.run_git("rev-parse", "HEAD", root=root).stdout.strip(), candidate_head)
+
     def test_continue_blocks_while_unmerged_and_preserves_conflict(self):
         worktree = self.start_conflict()
         merge_head_before = self.fixture.run_git(

@@ -60,6 +60,18 @@ cat "$(git rev-parse --git-common-dir)/steadflow-upstream-sync/state.json"
 
 状态中的 `phase` 为 `merging`/`conflicted` 时处理已登记冲突后运行 `--continue`；`validating` 时直接运行 `--continue` 复用现有候选；`merged` 时核对候选 HEAD、clean worktree 和两份报告。报告或候选现场必须保留，不能用重新执行真实业务或连续重试代替诊断。
 
+### 已完成候选修复后重新验证
+
+当 `phase=merged` 的候选在 CI 审查中发现问题，先在候选分支提交已审修复，保持原 source checkout 和升级 state。不要手改 state 或把旧 PASS 当成修复后证据。从原 source 目录运行已提交的候选工具：
+
+```bash
+<候选绝对路径>/tools/upstream-sync/upgrade --revalidate
+```
+
+该入口要求 clean 候选及严格后继于旧 evidence commit 的新 HEAD；同 HEAD、错误阶段、丢失祖先或配置变化均拒绝。工具在锁内用旧提交的临时 detached worktree 完整核验旧报告与 state 绑定，再按原流程进入 `validating`，运行全部验证并写入新的 canonical 报告。旧报告保留在必须可达的 Git 祖先中。source 身份、官方 release、ownership、known failures 和 migrations 校验保持；此入口不能更改已认证配置。
+
+验证失败或写报告中断后保留现场，用普通 `--continue` 恢复；成功后新的 `merged` evidence 只对应本次实际验证的候选。该命令不执行 push、tag 或部署。
+
 ### 验证期间补充测试文件归属
 
 上游测试 fixture 需要修正而该文件尚未登记为 fork 定制时，可以在候选的 `.steadflow/customization.yml` 中，仅向 `integration_adapter.paths` 单调追加对应 `frontend/src/**/__tests__/*.spec.ts` 路径。将测试最终内容和这份明确的归属登记一起审查并提交；原有路径、其他层、shared seams、生成命令、关键测试、known failures、迁移和 upstream lock 必须保持原 source 配置。此入口不支持生产代码归属扩展，也不会自动登记其他文件。

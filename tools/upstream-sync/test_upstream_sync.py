@@ -138,6 +138,7 @@ from upstream_sync import (
     parse_vitest_json,
     redact_report_secrets,
     resume_upgrade,
+    revalidate_upgrade,
     run_critical_commands,
     run_critical_suite,
     validate_known_failures,
@@ -3662,6 +3663,15 @@ class ReviewedTestOwnershipTests(unittest.TestCase):
         self.fixture.run_git("merge-base", "--is-ancestor", registration, "HEAD", root=self.worktree)
         self.assertEqual(verify_current(GitRepository(self.worktree))["lock"]["release"], "v1.1.0")
         self.assertEqual(resume_upgrade(self.repository)["evidence"], completed["evidence"])
+        approved_blob = self.fixture.run_git("rev-parse", f"HEAD:{self.test_path}", root=self.worktree).stdout
+        (self.worktree / "fork.txt").write_text("reviewed existing owned repair\n")
+        self.fixture.run_git("add", "fork.txt", root=self.worktree)
+        self.fixture.run_git("commit", "-m", "fix: repair after test registration", root=self.worktree)
+        revalidated = revalidate_upgrade(self.repository)
+        self.assertEqual(revalidated["phase"], "merged")
+        self.assertEqual(self.fixture.run_git("rev-parse", f"HEAD:{self.test_path}", root=self.worktree).stdout, approved_blob)
+        self.assertIn(self.test_path, json.loads(self.manifest_path.read_text())["integration_adapter"]["paths"])
+        self.assertEqual(verify_current(GitRepository(self.worktree))["lock"]["release"], "v1.1.0")
 
     def test_registration_survives_partial_baseline_write_recovery(self):
         self.register()
@@ -3707,6 +3717,112 @@ class ReviewedTestOwnershipTests(unittest.TestCase):
         self.register(commit=False)
         with self.assertRaises(UpgradeBlocked):
             resume_upgrade(self.repository)
+
+
+class UpgradeRevalidationTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.repository = self.fixture.repository()
+        self.fixture.add_release("v1.1.0")
+        self.original = create_upgrade_candidate(self.repository, "v1.1.0")
+        self.worktree = Path(self.original["worktree"])
+        self.report_path = ".steadflow/reports/v1.1.0.json"
+        self.historical = self.fixture.run_git(
+            "show", f"{self.original['evidence']['candidate_head']}:{self.report_path}",
+            root=self.worktree,
+        ).stdout
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def repair(self):
+        path = self.worktree / "fork.txt"
+        path.write_text(path.read_text() + "reviewed repair\n")
+        self.fixture.run_git("add", "fork.txt", root=self.worktree)
+        self.fixture.run_git("commit", "-m", "fix: reviewed candidate repair", root=self.worktree)
+        return self.fixture.run_git("rev-parse", "HEAD", root=self.worktree).stdout.strip()
+
+    def test_repaired_candidate_runs_every_gate_and_preserves_historical_evidence(self):
+        repair_head = self.repair()
+        calls = []
+        def runner(argv, **kwargs):
+            calls.append(list(argv))
+            return self.fixture.validation_runner(argv, **kwargs)
+        self.repository.validation_runner = runner
+        completed = revalidate_upgrade(self.repository)
+        self.assertEqual(completed["phase"], "merged")
+        self.assertEqual(completed["source_commit"], self.original["source_commit"])
+        self.assertEqual(completed["evidence"]["validated_head"], repair_head)
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(calls[1], ["go", "test", "-json", "./..."])
+        self.assertIn("vitest", calls[2])
+        self.assertEqual(calls[-1], ["make", "-C", "backend", "generate"])
+        self.assertEqual(self.fixture.run_git(
+            "show", f"{self.original['evidence']['candidate_head']}:{self.report_path}",
+            root=self.worktree,
+        ).stdout, self.historical)
+        self.assertEqual(resume_upgrade(self.repository)["evidence"], completed["evidence"])
+
+    def test_failed_revalidation_and_report_commit_interruption_resume(self):
+        self.repair()
+        self.repository.validation_runner = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr="fixture validation failure"
+        )
+        with self.assertRaises(UpgradeBlocked):
+            revalidate_upgrade(self.repository)
+        self.assertEqual(self.fixture.read_state()["phase"], "validating")
+        self.assertNotIn("evidence", self.fixture.read_state())
+        self.repository.validation_runner = self.fixture.validation_runner
+        def crash(event, **kwargs):
+            if event == "after_evidence_commit":
+                raise UpgradeBlocked("fixture evidence interruption")
+        self.repository.upgrade_test_hook = crash
+        with self.assertRaisesRegex(UpgradeBlocked, "evidence interruption"):
+            resume_upgrade(self.repository)
+        self.repository.upgrade_test_hook = lambda *args, **kwargs: None
+        self.assertEqual(resume_upgrade(self.repository)["phase"], "merged")
+
+    def test_rejects_same_head_dirty_non_descendant_and_wrong_phase_without_transition(self):
+        before = self.fixture.state_path.read_bytes()
+        with self.assertRaisesRegex(UpgradeBlocked, "new descendant"):
+            revalidate_upgrade(self.repository)
+        (self.worktree / "fork.txt").write_text("dirty\n")
+        with self.assertRaisesRegex(UpgradeBlocked, "must be clean"):
+            revalidate_upgrade(self.repository)
+        self.fixture.run_git("restore", "fork.txt", root=self.worktree)
+        self.fixture.run_git("reset", "--hard", self.original["evidence"]["validated_head"], root=self.worktree)
+        with self.assertRaisesRegex(UpgradeBlocked, "new descendant"):
+            revalidate_upgrade(self.repository)
+        self.assertEqual(self.fixture.state_path.read_bytes(), before)
+        state = json.loads(before)
+        state["phase"] = "validating"
+        state.pop("evidence")
+        self.fixture.state_path.write_text(json.dumps(state))
+        phase_before = self.fixture.state_path.read_bytes()
+        with self.assertRaisesRegex(UpgradeBlocked, "completed merged candidate"):
+            revalidate_upgrade(self.repository)
+        self.assertEqual(self.fixture.state_path.read_bytes(), phase_before)
+
+    def test_rejects_forged_historical_evidence_and_protected_configuration(self):
+        self.repair()
+        before = self.fixture.state_path.read_bytes()
+        state = json.loads(before)
+        state["evidence"]["validation_summary_sha256"] = "0" * 64
+        self.fixture.state_path.write_text(json.dumps(state))
+        forged = self.fixture.state_path.read_bytes()
+        with self.assertRaisesRegex(UpgradeBlocked, "evidence binding"):
+            revalidate_upgrade(self.repository)
+        self.assertEqual(self.fixture.state_path.read_bytes(), forged)
+        self.fixture.state_path.write_bytes(before)
+        path = self.worktree / ".steadflow/known-failures.yml"
+        document = json.loads(path.read_text())
+        document["baseline"]["historical_observation"] = "unreviewed change"
+        path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+        self.fixture.run_git("add", ".steadflow/known-failures.yml", root=self.worktree)
+        self.fixture.run_git("commit", "-m", "unreviewed configuration", root=self.worktree)
+        with self.assertRaisesRegex(UpgradeBlocked, "certified configuration"):
+            revalidate_upgrade(self.repository)
+        self.assertEqual(self.fixture.state_path.read_bytes(), before)
 
 
 class UpgradeCandidateValidationTests(unittest.TestCase):

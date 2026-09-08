@@ -250,7 +250,7 @@ def parse_cli(arguments):
     parser = argparse.ArgumentParser(
         prog="upgrade",
         usage=(
-            "upgrade vX.Y.Z | upgrade --continue | upgrade --verify-current | "
+            "upgrade vX.Y.Z | upgrade --continue | upgrade --revalidate | upgrade --verify-current | "
             "upgrade --run-critical | upgrade --supersede-with TAG --expected-commit SHA"
         ),
         description="Create or resume an isolated Steadflow upstream candidate.",
@@ -258,6 +258,7 @@ def parse_cli(arguments):
     parser.add_argument("release", nargs="?")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--continue", dest="continue_upgrade", action="store_true")
+    modes.add_argument("--revalidate", action="store_true")
     modes.add_argument("--verify-current", action="store_true")
     modes.add_argument("--run-critical", action="store_true")
     modes.add_argument("--supersede-with", metavar="TAG")
@@ -267,6 +268,7 @@ def parse_cli(arguments):
         (
             options.release is not None,
             options.continue_upgrade,
+            options.revalidate,
             options.verify_current,
             options.run_critical,
             options.supersede_with is not None,
@@ -274,7 +276,7 @@ def parse_cli(arguments):
     )
     if selected != 1:
         parser.error(
-            "choose exactly one release, --continue, --verify-current, or "
+            "choose exactly one release, --continue, --revalidate, --verify-current, or "
             "--run-critical"
         )
     if options.release is not None and not RELEASE_PATTERN.fullmatch(options.release):
@@ -311,6 +313,10 @@ def main(arguments=None):
         if options.verify_current:
             result = verify_current(repository)
             print_current_verification(result)
+            return 0
+        if options.revalidate:
+            candidate = revalidate_upgrade(repository)
+            print(f"PASS: candidate {candidate['branch']} revalidated at {candidate['worktree']}")
             return 0
         if options.continue_upgrade:
             candidate = resume_upgrade(repository)
@@ -3732,11 +3738,12 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
             )
         generated_paths = manifest["generated"]["paths"]
         diff_arguments = ["diff", "--exit-code", "--", *generated_paths]
-        generated_diff = repository.run(
-            *diff_arguments, cwd=worktree, check=False, read_only=True
-        )
-        if generated_diff.returncode != 0:
-            raise UpgradeBlocked("generated paths changed after regeneration")
+        if generated_paths:
+            generated_diff = repository.run(
+                *diff_arguments, cwd=worktree, check=False, read_only=True
+            )
+            if generated_diff.returncode != 0:
+                raise UpgradeBlocked("generated paths changed after regeneration")
         report["generated"] = {
             "paths": generated_paths,
             "status": "PASS",
@@ -4410,6 +4417,62 @@ def _require_clean_candidate(repository, worktree):
     ).stdout
     if status:
         raise UpgradeBlocked("candidate working tree must be clean")
+
+
+def revalidate_upgrade(repository):
+    """Validate committed repairs while retaining the previous report in Git history."""
+    verify_current(repository, check_ownership=False)
+    with _UpgradeStorage(repository) as storage:
+        _, state = _load_state(repository, storage)
+        if state["phase"] != "merged":
+            raise UpgradeBlocked("revalidate requires a completed merged candidate; use --continue")
+        identity = _source_identity(repository)
+        if identity[0] != state["source_commit"]:
+            raise UpgradeBlocked("source HEAD changed since upgrade state was created")
+        verify_current(repository, ownership_commit=state["source_commit"])
+        worktree = _validate_resume_state(repository, state, source_identity=identity)
+        _require_clean_candidate(repository, worktree)
+        head, _, _, hashes = _candidate_binding(repository, worktree)
+        previous = state["evidence"]["candidate_head"]
+        if head == previous or not _is_ancestor(repository, previous, head, worktree):
+            raise UpgradeBlocked("revalidate requires a new descendant of the recorded evidence commit")
+        # Validate the old PASS at its own immutable commit, never against the repair.
+        # Its complete report remains reachable as a required ancestor of the repair.
+        with _temporary_review_worktree(repository, previous) as historical:
+            # Git stores 100644, not the report writer's private 0600 mode.
+            # Normalize only this owned snapshot, after no-follow path checks.
+            descriptors = []
+            try:
+                descriptors.append(os.open(historical, _directory_flags()))
+                for name in (".steadflow", "reports"):
+                    descriptors.append(_open_child_directory(descriptors[-1], name, name))
+                for path in _validation_report_relative_paths(state["release"]):
+                    descriptor = os.open(
+                        Path(path).name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                        dir_fd=descriptors[-1],
+                    )
+                    try:
+                        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                            raise UpgradeBlocked("historical report must be a regular file")
+                        os.fchmod(descriptor, 0o600)
+                    finally:
+                        os.close(descriptor)
+            finally:
+                for descriptor in reversed(descriptors):
+                    os.close(descriptor)
+            _require_success_report(repository, state, historical)
+        if hashes != state["evidence"]["configuration_hashes"]:
+            raise UpgradeBlocked("revalidate cannot change certified configuration")
+        validation_state = {**state, "phase": "validating"}
+        _require_recorded_conflicts(repository, validation_state, worktree)
+        _validate_advanced_baseline(repository, state, worktree)
+        # Snapshot inspection may take time. Reject concurrent changes before the
+        # existing atomic validating transition; ordinary --continue handles crashes.
+        _validate_resume_state(repository, state, source_identity=_source_identity(repository))
+        _require_clean_candidate(repository, worktree)
+        if _candidate_binding(repository, worktree)[0] != head:
+            raise UpgradeBlocked("candidate HEAD changed during revalidation preparation")
+        return _run_and_persist_candidate_validation(repository, storage, state, worktree)
 
 
 def resume_upgrade(repository):

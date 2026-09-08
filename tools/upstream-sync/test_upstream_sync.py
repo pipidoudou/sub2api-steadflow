@@ -5444,7 +5444,7 @@ class UpgradeSupersedeTests(unittest.TestCase):
         self.assertTrue(Path(self.old_state["worktree"]).is_dir())
 
     def test_supersede_accepts_missing_registered_source_and_candidate(self):
-        missing = self.fixture.root / "old-source"
+        missing = (self.fixture.root / "old-source").resolve()
         self.fixture.run_git("worktree", "add", "-b", "old-source", str(missing), self.commit, root=self.fixture.fork)
         self.old_state["worktree"] = str(missing / ".worktrees" / "upgrade-v1.1.0")
         self.old_state["source_branch"] = "old-source"
@@ -5459,7 +5459,7 @@ class UpgradeSupersedeTests(unittest.TestCase):
         self.assertIn("branch refs/heads/old-source", registrations)
 
     def test_supersede_rejects_registered_source_branch_mismatch(self):
-        other = self.fixture.root / "other-source"
+        other = (self.fixture.root / "other-source").resolve()
         self.fixture.run_git("worktree", "add", "-b", "other-source", str(other), self.commit, root=self.fixture.fork)
         self.old_state["worktree"] = str(other / ".worktrees" / "upgrade-v1.1.0")
         self.fixture.state_path.write_text(json.dumps(self.old_state))

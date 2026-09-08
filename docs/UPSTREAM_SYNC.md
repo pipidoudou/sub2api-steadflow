@@ -11,7 +11,7 @@
 
 ## 1. 核验官方 Release 与 tag
 
-在 clean 的 fork `main` 上先确认 GitHub Release 确实来自官方仓库，记录 Release URL、tag、tag object 和 peeled commit：
+在 clean 的 fork `steadflow/main` 上先确认 GitHub Release 确实来自官方仓库，记录 Release URL、tag、tag object 和 peeled commit：
 
 ```bash
 gh release view vX.Y.Z --repo Wei-Shaw/sub2api \
@@ -60,21 +60,34 @@ cat "$(git rev-parse --git-common-dir)/steadflow-upstream-sync/state.json"
 
 状态中的 `phase` 为 `merging`/`conflicted` 时处理已登记冲突后运行 `--continue`；`validating` 时直接运行 `--continue` 复用现有候选；`merged` 时核对候选 HEAD、clean worktree 和两份报告。报告或候选现场必须保留，不能用重新执行真实业务或连续重试代替诊断。
 
+### 已被正式版本取代的过期状态
+
+若旧运行停在冲突或验证阶段，但后续正式版本已经包含旧运行的 Steadflow source 和官方 release 两条祖先，可显式结束旧状态。先根据已审核的不可变注释标签核对完整 commit SHA，再运行：
+
+```bash
+./tools/upstream-sync/upgrade --supersede-with steadflow-vX.Y.Z-rN \
+  --expected-commit <完整的40位已审核commit_SHA>
+```
+
+标签必须严格晚于旧运行的上游版本、等于当前 baseline，且被当前 clean HEAD 包含；轻量标签、SHA 不符、同版本、缺失两条祖先或不完整成功报告均阻断。工具在自行创建并清理的临时 detached worktree 中验证正式标签的当前契约，并在报告记录的历史 candidate 上复核完整成功报告及双格式 canonical 内容；这是读取已有审核证据，不重新执行产品测试，也不宣称后续修订已重新回归。
+
+所有状态操作持有原有 common-dir 锁。旧 `state.json` 原始字节原子归档为 `superseded-vX.Y.Z.json`，独立的 `superseded-vX.Y.Z.receipt.json` 保留原状态 SHA256、正式 tag object/commit、当前 HEAD 和报告 SHA256；两者均为 `0600`。receipt 先持久化，若在最终改名前中断，可在相同证据下重试；不同 receipt 或已有归档不会覆盖。支持从同一 common-dir 的另一 clean checkout 恢复，旧候选路径仍须属于同 common-dir 中原分支匹配的已注册源 checkout 的规范 `.worktrees` 路径；源目录也已丢失时可使用其尚未清理的 prunable 注册证明归属。旧 worktree 即使丢失也不阻断这条审核恢复路径，现存旧 worktree、分支和内部 ref 全部保留。该操作不将旧候选伪标记为验证通过，也不做 push、tag 或部署。
+
 ## 3. Known failures 与迁移停止条件
 
 营销与通用 Agent Skills 不属于 Sub2API 运行时定制面，源码统一维护在 `china-models/marketing/vendor/marketingskills/skills/`。fork 中禁止重新引入 `.agents/skills/`；这能避免每次上游升级都携带数百个与 console 无关的差异文件。
 
-当前 `.steadflow/known-failures.yml` 的认证 `v0.1.178` 基线为 0 个失败；早先提到的 12 个失败未在认证环境复现，不能据此声称它们已被逐项修复。
+认证版本和 exact 失败清单以当前 `.steadflow/known-failures.yml` 的 `baseline.release` 与登记条目为准，并必须与 `.steadflow/upstream-lock.json` 一致。历史报告中的失败数量不能代替当前认证结果。
 
 以后只有可复现的上游非关键失败才能登记。每项必须包含排序且唯一的 exact ID、`category: upstream-known`、原因、`first_seen`、`expires` 和可复现的 `evidence_command`。`expires: vX.Y.Z` 是排他的 release 边界：目标 release 达到或超过该版本时条目过期并阻断。若 exact ID 已通过，则它属于 `fixed`，必须从清单移除后候选才能通过。新增、过期、fixed 未移除及所有 critical 失败一律阻断；critical 没有豁免清单。
 
-`backend/migrations/` 的历史文件受 `.steadflow/migration-checksums.json` 保护：不得修改、重命名或删除。新增迁移必须分类和审查；发现删除/重命名字段、破坏性类型或语义变更、不可逆数据转换等 destructive migration 时立即停止，不能把它混入普通上游升级。
+`backend/migrations/` 的历史文件受 `.steadflow/migration-checksums.json` 保护：不得修改、重命名或删除。新增迁移必须分类和审查；发现删除/重命名字段、破坏性类型或语义变更、不可逆数据转换等 destructive migration 时，立即停止普通升级路径。只有完成精确 SQL 审查，并使用完整备份演练恢复且验证通过后，才可通过现有 `reviewed_additions` 按文件精确 SHA256 登记审核结果；不得修改迁移内容或扩大工具豁免。部署时必须同时具备与该迁移匹配的恢复策略，镜像回滚不能代替数据库恢复。
 
 ## 4. 报告、PR 与不可变标签
 
 候选验证会先在隔离 worktree 内执行 `pnpm install --frozen-lockfile`，再运行完整产品回归，避免依赖主工作树的 `node_modules`。验证完成后，检查 JSON/Markdown 完整报告、候选 commit/tree、官方 tag/commit、生成代码、迁移、known failures、关键命令和完整测试结果。然后由人工把 `upgrade/vX.Y.Z` 推到 fork 并创建 PR；PR 以 `.github/workflows/steadflow-upstream-ci.yml` 的只读结果为合并门槛。同步工具自身的完整用例仅在 `tools/upstream-sync/**` 或其 CI 定义变化时运行；普通上游版本候选仍执行完整产品回归，但不会重复测试同步工具实现。
 
-合并必须保留当前 Steadflow 祖先和官方 release 祖先，禁止 squash 或 rebase 成单祖先历史。合并通过且经人工批准后，在 fork `main` 的精确合并 commit 上创建不可变标签：
+合并必须保留当前 Steadflow 祖先和官方 release 祖先，禁止 squash 或 rebase 成单祖先历史。合并通过且经人工批准后，在 fork `steadflow/main` 的精确合并 commit 上创建不可变标签：
 
 ```text
 steadflow-vX.Y.Z-rN

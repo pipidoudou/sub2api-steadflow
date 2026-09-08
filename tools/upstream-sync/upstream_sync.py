@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import uuid
 from pathlib import Path, PurePosixPath
@@ -39,6 +40,7 @@ UPSTREAM_LOCK_KEYS = frozenset(
     ("schema_version", "remote", "repository", "release", "peeled_commit", "tree")
 )
 RELEASE_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+REVIEWED_TAG_PATTERN = re.compile(r"^steadflow-(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-r[1-9]\d*$")
 OBJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SEAM_STRATEGIES = frozenset(
@@ -249,7 +251,7 @@ def parse_cli(arguments):
         prog="upgrade",
         usage=(
             "upgrade vX.Y.Z | upgrade --continue | upgrade --verify-current | "
-            "upgrade --run-critical"
+            "upgrade --run-critical | upgrade --supersede-with TAG --expected-commit SHA"
         ),
         description="Create or resume an isolated Steadflow upstream candidate.",
     )
@@ -258,6 +260,8 @@ def parse_cli(arguments):
     modes.add_argument("--continue", dest="continue_upgrade", action="store_true")
     modes.add_argument("--verify-current", action="store_true")
     modes.add_argument("--run-critical", action="store_true")
+    modes.add_argument("--supersede-with", metavar="TAG")
+    parser.add_argument("--expected-commit", metavar="SHA")
     options = parser.parse_args(arguments)
     selected = sum(
         (
@@ -265,6 +269,7 @@ def parse_cli(arguments):
             options.continue_upgrade,
             options.verify_current,
             options.run_critical,
+            options.supersede_with is not None,
         )
     )
     if selected != 1:
@@ -274,6 +279,13 @@ def parse_cli(arguments):
         )
     if options.release is not None and not RELEASE_PATTERN.fullmatch(options.release):
         parser.error("release must match vX.Y.Z without leading zeroes")
+    if options.supersede_with is not None:
+        if not REVIEWED_TAG_PATTERN.fullmatch(options.supersede_with):
+            parser.error("superseding tag must match steadflow-vX.Y.Z-rN")
+        if not options.expected_commit or not OBJECT_ID_PATTERN.fullmatch(options.expected_commit):
+            parser.error("--supersede-with requires --expected-commit with a full commit SHA")
+    elif options.expected_commit is not None:
+        parser.error("--expected-commit requires --supersede-with")
     return options
 
 
@@ -281,6 +293,10 @@ def main(arguments=None):
     options = parse_cli(sys.argv[1:] if arguments is None else arguments)
     try:
         repository = GitRepository.discover(Path.cwd())
+        if options.supersede_with:
+            archive = supersede_upgrade(repository, options.supersede_with, options.expected_commit)
+            print(f"PASS: superseded upgrade state archived at {archive}")
+            return 0
         if options.run_critical:
             result = verify_current(repository)
             command_reports = run_critical_suite(
@@ -2172,10 +2188,10 @@ class _UpgradeStorage:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(temporary_name, dir_fd=self.directory_fd)
 
-    def archive_state(self, state):
+    def archive_state(self, state, *, prefix="completed"):
         """Atomically rename the active state without overwriting prior audit."""
         self._validate_state_entry()
-        archive_name = f"completed-{state['release']}.json"
+        archive_name = f"{prefix}-{state['release']}.json"
         try:
             os.stat(archive_name, dir_fd=self.directory_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -2208,6 +2224,134 @@ class _UpgradeStorage:
         except OSError as error:
             raise UpgradeBlocked("unable to archive completed upgrade state") from error
         return self.directory_path / archive_name
+
+
+
+def _reviewed_tag_identity(repository, tag, expected_commit):
+    reference = f"refs/tags/{tag}"
+    tag_object = repository.run(
+        "rev-parse", "--verify", reference, read_only=True
+    ).stdout.strip()
+    if repository.run("cat-file", "-t", tag_object, read_only=True).stdout.strip() != "tag":
+        raise UpgradeBlocked("superseding release tag must be annotated")
+    commit = repository.run(
+        "rev-parse", f"{tag_object}^{{commit}}", read_only=True
+    ).stdout.strip()
+    if commit != expected_commit:
+        raise UpgradeBlocked("superseding tag does not match expected commit")
+    return tag_object
+
+
+@contextlib.contextmanager
+def _temporary_review_worktree(repository, commit):
+    # Only the temporary worktree owned by this operation is removed.
+    with tempfile.TemporaryDirectory(prefix="steadflow-reviewed-") as directory:
+        root = Path(directory) / "source"
+        repository.run_without_hooks(
+            "worktree", "add", "--detach", str(root), commit,
+            operation="reviewed source snapshot creation",
+        )
+        try:
+            yield root
+        finally:
+            repository.run_without_hooks(
+                "worktree", "remove", str(root),
+                operation="reviewed source snapshot cleanup",
+            )
+
+
+def _verify_superseding_report(repository, tag_commit, release):
+    relative_paths = _validation_report_relative_paths(release)
+    contents = {
+        path: repository.read_blob_bytes(tag_commit, path)
+        for path in relative_paths
+    }
+    report = _load_json_bytes(contents[relative_paths[0]], "superseding report")
+    if not isinstance(report, dict) or set(report) != SUCCESS_REPORT_KEYS:
+        raise UpgradeBlocked("superseding success report schema is incomplete")
+    for field in ("candidate_head", "candidate_tree", "source_commit", "peeled_commit", "tag_object"):
+        if not isinstance(report[field], str) or not OBJECT_ID_PATTERN.fullmatch(report[field]):
+            raise UpgradeBlocked(f"superseding report {field} is invalid")
+    if report["release"] != release:
+        raise UpgradeBlocked("superseding report release does not match tag")
+    if not _is_ancestor(repository, report["candidate_head"], tag_commit, repository.root):
+        raise UpgradeBlocked("superseding tag does not contain reported candidate")
+    tree = repository.run(
+        "rev-parse", f"{report['candidate_head']}^{{tree}}", read_only=True
+    ).stdout.strip()
+    if tree != report["candidate_tree"]:
+        raise UpgradeBlocked("superseding report candidate tree binding is invalid")
+    if not isinstance(report["seams"], dict) or not isinstance(report["seams"].get("conflicts"), list):
+        raise UpgradeBlocked("superseding report conflict seams are invalid")
+    report_state = {
+        field: report[field]
+        for field in ("release", "source_commit", "peeled_commit", "tag_object")
+    }
+    report_state["conflicts"] = {"paths": report["seams"]["conflicts"]}
+    _require_merged_ancestry(repository, report_state, report["candidate_head"], repository.root)
+    with _temporary_review_worktree(repository, tag_commit) as worktree:
+        reviewed = verify_current(GitRepository(worktree))
+        if reviewed["lock"]["release"] != release or reviewed["lock"]["peeled_commit"] != report["peeled_commit"]:
+            raise UpgradeBlocked("superseding tag lock does not match report")
+        repository.run_without_hooks(
+            "checkout", "--detach", report["candidate_head"], cwd=worktree,
+            operation="historical report snapshot checkout",
+        )
+        _parse_canonical_success_report(report_state, worktree, contents)
+    return {path: hashlib.sha256(content).hexdigest() for path, content in contents.items()}
+
+
+def supersede_upgrade(repository, tag, expected_commit):
+    """Archive stale state only against an explicitly accepted newer release."""
+    match = REVIEWED_TAG_PATTERN.fullmatch(tag)
+    if not match or not OBJECT_ID_PATTERN.fullmatch(expected_commit):
+        raise UpgradeBlocked("supersede requires a reviewed tag and full expected commit")
+    release = match.group(1)
+    with _UpgradeStorage(repository) as storage:
+        _, state = _load_state(repository, storage, allow_registered_source=True)
+        original = storage.read_state_bytes()
+        current = verify_current(repository)
+        if _release_tuple(release) <= _release_tuple(state["release"]):
+            raise UpgradeBlocked("superseding release must be newer than active upgrade")
+        if current["lock"]["release"] != release:
+            raise UpgradeBlocked("superseding release must match current baseline")
+        tag_object = _reviewed_tag_identity(repository, tag, expected_commit)
+        source_head = repository.run("rev-parse", "HEAD", read_only=True).stdout.strip()
+        if not _is_ancestor(repository, expected_commit, source_head, repository.root):
+            raise UpgradeBlocked("current source does not contain superseding tag")
+        _require_merged_ancestry(repository, state, expected_commit, repository.root)
+        reports = _verify_superseding_report(repository, expected_commit, release)
+        # Recheck mutable references and state after the snapshot validation.
+        if _reviewed_tag_identity(repository, tag, expected_commit) != tag_object:
+            raise UpgradeBlocked("superseding tag changed during validation")
+        verify_current(repository)
+        if repository.run("rev-parse", "HEAD", read_only=True).stdout.strip() != source_head:
+            raise UpgradeBlocked("source HEAD changed during supersede validation")
+        if storage.read_state_bytes() != original:
+            raise UpgradeBlocked("active state changed during supersede validation")
+        receipt = {
+            "schema_version": 1,
+            "status": "SUPERSEDED",
+            "original_state_sha256": hashlib.sha256(original).hexdigest(),
+            "release": state["release"],
+            "superseding_tag": tag,
+            "superseding_tag_object": tag_object,
+            "superseding_commit": expected_commit,
+            "source_head": source_head,
+            "report_content_sha256": reports,
+        }
+        name = f"superseded-{state['release']}.receipt.json"
+        content = _canonical_json_bytes(receipt)
+        try:
+            existing, _ = _read_regular_at(storage.directory_fd, name)
+        except FileNotFoundError:
+            _atomic_write_at(storage.directory_fd, name, content)
+            os.fsync(storage.directory_fd)
+        else:
+            # A crash before the final rename may leave only the receipt.
+            if existing != content:
+                raise UpgradeBlocked("superseded receipt already exists with different evidence")
+        return storage.archive_state(state, prefix="superseded")
 
 
 def _write_state(storage, state):
@@ -2266,7 +2410,7 @@ def _validate_hash_mapping(values, expected_keys, pattern, label):
         raise UpgradeBlocked(f"upgrade state {label} is invalid")
 
 
-def _load_state(repository, storage):
+def _load_state(repository, storage, *, allow_registered_source=False):
     path = storage.state_path
     try:
         raw_state = storage.read_state_bytes().decode("utf-8")
@@ -2382,7 +2526,31 @@ def _load_state(repository, storage):
         raise UpgradeBlocked("upgrade state worktree must be absolute")
     expected_worktree = _upgrade_worktree_path(repository, state["release"])
     if Path(state["worktree"]).resolve() != expected_worktree:
-        raise UpgradeBlocked("upgrade state worktree path is inconsistent")
+        # Supersede may run from a new clean checkout while retaining a stale
+        # candidate owned by another registered source checkout in this repo.
+        recorded_worktree = Path(state["worktree"])
+        source_root = recorded_worktree.parent.parent
+        registrations = [
+            entry for entry in _registered_worktrees(repository)
+            if isinstance(entry.get("worktree"), str)
+            and Path(entry["worktree"]) == source_root
+            and entry.get("branch") == f"refs/heads/{state['source_branch']}"
+        ] if allow_registered_source else []
+        canonical_worktree = source_root / ".worktrees" / f"upgrade-{state['release']}"
+        if (
+            not registrations
+            or recorded_worktree != canonical_worktree
+            or recorded_worktree != recorded_worktree.resolve()
+        ):
+            raise UpgradeBlocked("upgrade state worktree path is inconsistent")
+        # A prunable registration still binds a vanished source to this common
+        # directory and its original branch. Never prune it or recreate paths.
+        if not any(entry.get("prunable") for entry in registrations):
+            source_repository = GitRepository(source_root)
+            if _git_common_directory(source_repository) != _git_common_directory(repository):
+                raise UpgradeBlocked("upgrade state source common directory is inconsistent")
+            if recorded_worktree != _upgrade_worktree_path(source_repository, state["release"]):
+                raise UpgradeBlocked("upgrade state worktree path is inconsistent")
     return path, state
 
 

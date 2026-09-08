@@ -70,9 +70,12 @@ jobs:
           echo "name=${REGISTRY}/${repository}" >> "$GITHUB_OUTPUT"
       - id: version
         shell: bash
+        env:
+          REVIEWED_TAG: ${{ steps.source.outputs.tag }}
         run: |
-          version="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+          version="${REVIEWED_TAG#steadflow-v}"
+          version="${version%-r*}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo 'Invalid backend version.' >&2
             exit 2
           fi

@@ -5355,6 +5355,172 @@ class UpgradeCompletedLifecycleTests(unittest.TestCase):
         self.assertEqual(dirty.read_text(encoding="utf-8"), "preserve\n")
 
 
+class UpgradeSupersedeTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = HermeticUpgradeFixture()
+        self.fixture.add_release("v1.1.0")
+        result = self.fixture.run_upgrade("v1.1.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.old_state = self.fixture.read_state()
+        self.fixture.run_git("merge", "--no-ff", "--no-edit", self.old_state["branch"], root=self.fixture.fork)
+        result = self.fixture.run_upgrade("--continue")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.fixture.add_release("v1.2.0")
+        result = self.fixture.run_upgrade("v1.2.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.new_state = self.fixture.read_state()
+        self.fixture.run_git("merge", "--no-ff", "--no-edit", self.new_state["branch"], root=self.fixture.fork)
+        self.commit = self.fixture.run_git("rev-parse", "HEAD", root=self.fixture.fork).stdout.strip()
+        self.tag = "steadflow-v1.2.0-r1"
+        self.fixture.run_git("tag", "-a", self.tag, "-m", "reviewed release", root=self.fixture.fork)
+        self.fixture.state_path.write_text(json.dumps(self.old_state, indent=4) + "\n")
+        self.original = self.fixture.state_path.read_bytes()
+        self.archive = self.fixture.state_path.with_name("superseded-v1.1.0.json")
+        self.receipt = self.fixture.state_path.with_name("superseded-v1.1.0.receipt.json")
+
+    def tearDown(self):
+        self.fixture.cleanup()
+
+    def supersede(self, *arguments):
+        return self.fixture.run_upgrade(
+            "--supersede-with", self.tag, "--expected-commit", self.commit, *arguments
+        )
+
+    def assert_blocked_preserves_state(self, result, message):
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(message, result.stderr)
+        self.assertEqual(self.fixture.state_path.read_bytes(), self.original)
+        self.assertFalse(self.archive.exists())
+
+    def test_supersede_preserves_original_state_and_all_old_refs(self):
+        refs = self.fixture.run_git("show-ref", root=self.fixture.fork).stdout
+        result = self.supersede()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.fixture.state_path.exists())
+        self.assertEqual(self.archive.read_bytes(), self.original)
+        receipt = json.loads(self.receipt.read_text())
+        self.assertEqual(receipt["superseding_commit"], self.commit)
+        self.assertEqual(receipt["original_state_sha256"], hashlib.sha256(self.original).hexdigest())
+        self.assertEqual(receipt["status"], "SUPERSEDED")
+        self.assertEqual(stat.S_IMODE(self.archive.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.receipt.stat().st_mode), 0o600)
+        self.assertEqual(self.fixture.run_git("show-ref", root=self.fixture.fork).stdout, refs)
+        self.assertTrue(Path(self.old_state["worktree"]).is_dir())
+        # A pre-existing archive is never replaced. A receipt-only interrupted
+        # operation can safely complete when every evidence byte still matches.
+        self.fixture.state_path.write_bytes(self.original)
+        blocked = self.supersede()
+        self.assertEqual(blocked.returncode, 2, blocked.stderr)
+        self.assertIn("archive already exists", blocked.stderr)
+        self.assertEqual(self.archive.read_bytes(), self.original)
+        self.archive.unlink()
+        retried = self.supersede()
+        self.assertEqual(retried.returncode, 0, retried.stderr)
+        self.assertEqual(self.archive.read_bytes(), self.original)
+
+    def test_supersede_recovers_missing_old_worktree(self):
+        self.old_state.pop("evidence")
+        self.old_state["phase"] = "conflicted"
+        self.old_state["conflicts"] = {
+            "paths": ["shared.txt"],
+            "customization_sha256": "a" * 64,
+            "binding_sha256": "b" * 64,
+        }
+        self.fixture.state_path.write_text(json.dumps(self.old_state, indent=4) + "\n")
+        self.original = self.fixture.state_path.read_bytes()
+        shutil.rmtree(self.old_state["worktree"])
+        result = self.supersede()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.archive.read_bytes(), self.original)
+
+    def test_supersede_from_another_registered_source_worktree(self):
+        other = self.fixture.root / "recovery-source"
+        self.fixture.run_git("worktree", "add", "--detach", str(other), self.commit, root=self.fixture.fork)
+        result = self.fixture.run_upgrade(
+            "--supersede-with", self.tag, "--expected-commit", self.commit, cwd=other
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.archive.read_bytes(), self.original)
+        self.assertTrue(Path(self.old_state["worktree"]).is_dir())
+
+    def test_supersede_accepts_missing_registered_source_and_candidate(self):
+        missing = self.fixture.root / "old-source"
+        self.fixture.run_git("worktree", "add", "-b", "old-source", str(missing), self.commit, root=self.fixture.fork)
+        self.old_state["worktree"] = str(missing / ".worktrees" / "upgrade-v1.1.0")
+        self.old_state["source_branch"] = "old-source"
+        self.fixture.state_path.write_text(json.dumps(self.old_state))
+        self.original = self.fixture.state_path.read_bytes()
+        shutil.rmtree(missing)
+        result = self.supersede()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.archive.read_bytes(), self.original)
+        registrations = self.fixture.run_git("worktree", "list", "--porcelain", root=self.fixture.fork).stdout
+        self.assertIn(str(missing), registrations)
+        self.assertIn("branch refs/heads/old-source", registrations)
+
+    def test_supersede_rejects_registered_source_branch_mismatch(self):
+        other = self.fixture.root / "other-source"
+        self.fixture.run_git("worktree", "add", "-b", "other-source", str(other), self.commit, root=self.fixture.fork)
+        self.old_state["worktree"] = str(other / ".worktrees" / "upgrade-v1.1.0")
+        self.fixture.state_path.write_text(json.dumps(self.old_state))
+        self.original = self.fixture.state_path.read_bytes()
+        shutil.rmtree(other)
+        self.assert_blocked_preserves_state(self.supersede(), "worktree path is inconsistent")
+
+    def test_supersede_rejects_unregistered_source_worktree_path(self):
+        self.old_state["worktree"] = str(self.fixture.root / "unregistered" / ".worktrees" / "upgrade-v1.1.0")
+        self.fixture.state_path.write_text(json.dumps(self.old_state))
+        self.original = self.fixture.state_path.read_bytes()
+        self.assert_blocked_preserves_state(self.supersede(), "worktree path is inconsistent")
+
+    def test_supersede_rejects_lightweight_tag(self):
+        self.tag = "steadflow-v1.2.0-r2"
+        self.fixture.run_git("tag", self.tag, root=self.fixture.fork)
+        self.assert_blocked_preserves_state(self.supersede(), "must be annotated")
+
+    def test_supersede_rejects_expected_commit_mismatch(self):
+        self.commit = self.old_state["source_commit"]
+        self.assert_blocked_preserves_state(self.supersede(), "expected commit")
+
+    def test_supersede_requires_explicit_expected_commit(self):
+        result = self.fixture.run_upgrade("--supersede-with", self.tag)
+        self.assert_blocked_preserves_state(result, "requires --expected-commit")
+
+    def test_supersede_rejects_same_release(self):
+        self.fixture.state_path.write_text(json.dumps(self.new_state))
+        self.original = self.fixture.state_path.read_bytes()
+        self.assert_blocked_preserves_state(self.supersede(), "must be newer")
+
+    def test_supersede_rejects_uncontained_old_source(self):
+        orphan = self.fixture.run_git("commit-tree", "HEAD^{tree}", "-m", "unrelated source", root=self.fixture.fork).stdout.strip()
+        self.old_state["source_commit"] = orphan
+        self.fixture.state_path.write_text(json.dumps(self.old_state))
+        self.original = self.fixture.state_path.read_bytes()
+        self.assert_blocked_preserves_state(self.supersede(), "source ancestry")
+
+    def test_supersede_rejects_dirty_current_source(self):
+        (self.fixture.fork / "fork.txt").write_text("unreviewed edit\n")
+        self.assert_blocked_preserves_state(self.supersede(), "must be clean")
+
+    def test_supersede_rejects_tampered_report(self):
+        path = self.fixture.fork / ".steadflow/reports/v1.2.0.json"
+        report = json.loads(path.read_text())
+        report["full_go"]["passed"] = []
+        path.write_text(json.dumps(report))
+        self.fixture.run_git("add", str(path), root=self.fixture.fork)
+        self.fixture.run_git("commit", "-m", "tampered report", root=self.fixture.fork)
+        self.commit = self.fixture.run_git("rev-parse", "HEAD", root=self.fixture.fork).stdout.strip()
+        self.tag = "steadflow-v1.2.0-r2"
+        self.fixture.run_git("tag", "-a", self.tag, "-m", "invalid report", root=self.fixture.fork)
+        self.assert_blocked_preserves_state(self.supersede(), "executed zero tests")
+
+    def test_supersede_does_not_overwrite_receipt(self):
+        self.receipt.write_text("existing audit\n")
+        self.receipt.chmod(0o600)
+        self.assert_blocked_preserves_state(self.supersede(), "different evidence")
+        self.assertEqual(self.receipt.read_text(), "existing audit\n")
+
+
 class UpgradePreflightFailureTests(unittest.TestCase):
     def setUp(self):
         self.fixture = HermeticUpgradeFixture()

@@ -416,6 +416,16 @@
       ]
     },
     {
+      "owner": "integration_adapter",
+      "path": "Makefile",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "upgrade_contracts",
+        "full_product_regression"
+      ]
+    },
+    {
       "owner": "branding_settings",
       "path": "README.md",
       "risk": "medium",

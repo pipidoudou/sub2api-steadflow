@@ -1,6 +1,10 @@
 .PHONY: build build-backend build-frontend build-datamanagementd test test-backend test-frontend test-frontend-critical test-steadflow-critical test-datamanagementd secret-scan
 
 FRONTEND_CRITICAL_VITEST := \
+	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
+	src/api/__tests__/client.spec.ts \
+	src/api/__tests__/tokenRefresh.spec.ts \
+	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \

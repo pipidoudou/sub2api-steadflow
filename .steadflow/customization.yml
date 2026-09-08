@@ -421,8 +421,8 @@
       "risk": "medium",
       "strategy": "semantic-resolver",
       "tests": [
-        "upgrade_contracts",
-        "full_product_regression"
+        "full_product_regression",
+        "upgrade_contracts"
       ]
     },
     {

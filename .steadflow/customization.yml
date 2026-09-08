@@ -237,6 +237,8 @@
       ".steadflow/reports/v0.2.0.md",
       ".steadflow/reports/v0.2.1.json",
       ".steadflow/reports/v0.2.1.md",
+      ".steadflow/reports/v0.2.3.json",
+      ".steadflow/reports/v0.2.3.md",
       ".steadflow/upstream-lock.json",
       "DEV_GUIDE.md",
       "Dockerfile",
@@ -332,6 +334,7 @@
       "frontend/src/components/payment/OrderStatusBadge.vue",
       "frontend/src/components/payment/OrderTable.vue",
       "frontend/src/router/index.ts",
+      "frontend/src/views/admin/__tests__/GroupsView.codexManifest.spec.ts",
       "frontend/src/views/admin/orders/AdminOrdersView.vue",
       "openspec/changes/add-openai-compatible-prompt-audit/.openspec.yaml",
       "openspec/changes/add-openai-compatible-prompt-audit/README.md",
@@ -412,6 +415,16 @@
       "risk": "medium",
       "strategy": "semantic-resolver",
       "tests": [
+        "upgrade_contracts"
+      ]
+    },
+    {
+      "owner": "integration_adapter",
+      "path": "Makefile",
+      "risk": "medium",
+      "strategy": "semantic-resolver",
+      "tests": [
+        "full_product_regression",
         "upgrade_contracts"
       ]
     },

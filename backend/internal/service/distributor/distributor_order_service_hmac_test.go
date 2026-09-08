@@ -102,7 +102,9 @@ func TestSignWebhookPayload_MatchesReferenceHMAC(t *testing.T) {
 	secret := []byte("supersecret")
 	body := []byte(`{"a":1}`)
 	wantMac := hmac.New(sha256.New, secret)
-	wantMac.Write(body)
+	if _, err := wantMac.Write(body); err != nil {
+		t.Fatalf("reference HMAC write failed: %v", err)
+	}
 	wantHex := "sha256=" + hex.EncodeToString(wantMac.Sum(nil))
 
 	got := SignWebhookPayload(secret, body)
@@ -200,7 +202,8 @@ func TestNotifyBFFWebhook_SendsFulfillmentPayloadForBFF(t *testing.T) {
 	if got["status"] != "fulfilled" {
 		t.Fatalf("status mismatch: %#v", got)
 	}
-	if got["shadowUserId"].(float64) != 456 {
+	shadowUserID, ok := got["shadowUserId"].(float64)
+	if !ok || shadowUserID != 456 {
 		t.Fatalf("shadowUserId mismatch: %#v", got)
 	}
 	if got["apiKey"] != "sk-real-abc" {

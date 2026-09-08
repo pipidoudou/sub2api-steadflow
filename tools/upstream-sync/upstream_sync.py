@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import uuid
 from pathlib import Path, PurePosixPath
@@ -39,6 +40,7 @@ UPSTREAM_LOCK_KEYS = frozenset(
     ("schema_version", "remote", "repository", "release", "peeled_commit", "tree")
 )
 RELEASE_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+REVIEWED_TAG_PATTERN = re.compile(r"^steadflow-(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-r[1-9]\d*$")
 OBJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SEAM_STRATEGIES = frozenset(
@@ -248,32 +250,44 @@ def parse_cli(arguments):
     parser = argparse.ArgumentParser(
         prog="upgrade",
         usage=(
-            "upgrade vX.Y.Z | upgrade --continue | upgrade --verify-current | "
-            "upgrade --run-critical"
+            "upgrade vX.Y.Z | upgrade --continue | upgrade --revalidate | upgrade --verify-current | "
+            "upgrade --run-critical | upgrade --supersede-with TAG --expected-commit SHA"
         ),
         description="Create or resume an isolated Steadflow upstream candidate.",
     )
     parser.add_argument("release", nargs="?")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--continue", dest="continue_upgrade", action="store_true")
+    modes.add_argument("--revalidate", action="store_true")
     modes.add_argument("--verify-current", action="store_true")
     modes.add_argument("--run-critical", action="store_true")
+    modes.add_argument("--supersede-with", metavar="TAG")
+    parser.add_argument("--expected-commit", metavar="SHA")
     options = parser.parse_args(arguments)
     selected = sum(
         (
             options.release is not None,
             options.continue_upgrade,
+            options.revalidate,
             options.verify_current,
             options.run_critical,
+            options.supersede_with is not None,
         )
     )
     if selected != 1:
         parser.error(
-            "choose exactly one release, --continue, --verify-current, or "
+            "choose exactly one release, --continue, --revalidate, --verify-current, or "
             "--run-critical"
         )
     if options.release is not None and not RELEASE_PATTERN.fullmatch(options.release):
         parser.error("release must match vX.Y.Z without leading zeroes")
+    if options.supersede_with is not None:
+        if not REVIEWED_TAG_PATTERN.fullmatch(options.supersede_with):
+            parser.error("superseding tag must match steadflow-vX.Y.Z-rN")
+        if not options.expected_commit or not OBJECT_ID_PATTERN.fullmatch(options.expected_commit):
+            parser.error("--supersede-with requires --expected-commit with a full commit SHA")
+    elif options.expected_commit is not None:
+        parser.error("--expected-commit requires --supersede-with")
     return options
 
 
@@ -281,6 +295,10 @@ def main(arguments=None):
     options = parse_cli(sys.argv[1:] if arguments is None else arguments)
     try:
         repository = GitRepository.discover(Path.cwd())
+        if options.supersede_with:
+            archive = supersede_upgrade(repository, options.supersede_with, options.expected_commit)
+            print(f"PASS: superseded upgrade state archived at {archive}")
+            return 0
         if options.run_critical:
             result = verify_current(repository)
             command_reports = run_critical_suite(
@@ -295,6 +313,10 @@ def main(arguments=None):
         if options.verify_current:
             result = verify_current(repository)
             print_current_verification(result)
+            return 0
+        if options.revalidate:
+            candidate = revalidate_upgrade(repository)
+            print(f"PASS: candidate {candidate['branch']} revalidated at {candidate['worktree']}")
             return 0
         if options.continue_upgrade:
             candidate = resume_upgrade(repository)
@@ -2172,10 +2194,10 @@ class _UpgradeStorage:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(temporary_name, dir_fd=self.directory_fd)
 
-    def archive_state(self, state):
+    def archive_state(self, state, *, prefix="completed"):
         """Atomically rename the active state without overwriting prior audit."""
         self._validate_state_entry()
-        archive_name = f"completed-{state['release']}.json"
+        archive_name = f"{prefix}-{state['release']}.json"
         try:
             os.stat(archive_name, dir_fd=self.directory_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -2208,6 +2230,134 @@ class _UpgradeStorage:
         except OSError as error:
             raise UpgradeBlocked("unable to archive completed upgrade state") from error
         return self.directory_path / archive_name
+
+
+
+def _reviewed_tag_identity(repository, tag, expected_commit):
+    reference = f"refs/tags/{tag}"
+    tag_object = repository.run(
+        "rev-parse", "--verify", reference, read_only=True
+    ).stdout.strip()
+    if repository.run("cat-file", "-t", tag_object, read_only=True).stdout.strip() != "tag":
+        raise UpgradeBlocked("superseding release tag must be annotated")
+    commit = repository.run(
+        "rev-parse", f"{tag_object}^{{commit}}", read_only=True
+    ).stdout.strip()
+    if commit != expected_commit:
+        raise UpgradeBlocked("superseding tag does not match expected commit")
+    return tag_object
+
+
+@contextlib.contextmanager
+def _temporary_review_worktree(repository, commit):
+    # Only the temporary worktree owned by this operation is removed.
+    with tempfile.TemporaryDirectory(prefix="steadflow-reviewed-") as directory:
+        root = Path(directory) / "source"
+        repository.run_without_hooks(
+            "worktree", "add", "--detach", str(root), commit,
+            operation="reviewed source snapshot creation",
+        )
+        try:
+            yield root
+        finally:
+            repository.run_without_hooks(
+                "worktree", "remove", str(root),
+                operation="reviewed source snapshot cleanup",
+            )
+
+
+def _verify_superseding_report(repository, tag_commit, release):
+    relative_paths = _validation_report_relative_paths(release)
+    contents = {
+        path: repository.read_blob_bytes(tag_commit, path)
+        for path in relative_paths
+    }
+    report = _load_json_bytes(contents[relative_paths[0]], "superseding report")
+    if not isinstance(report, dict) or set(report) != SUCCESS_REPORT_KEYS:
+        raise UpgradeBlocked("superseding success report schema is incomplete")
+    for field in ("candidate_head", "candidate_tree", "source_commit", "peeled_commit", "tag_object"):
+        if not isinstance(report[field], str) or not OBJECT_ID_PATTERN.fullmatch(report[field]):
+            raise UpgradeBlocked(f"superseding report {field} is invalid")
+    if report["release"] != release:
+        raise UpgradeBlocked("superseding report release does not match tag")
+    if not _is_ancestor(repository, report["candidate_head"], tag_commit, repository.root):
+        raise UpgradeBlocked("superseding tag does not contain reported candidate")
+    tree = repository.run(
+        "rev-parse", f"{report['candidate_head']}^{{tree}}", read_only=True
+    ).stdout.strip()
+    if tree != report["candidate_tree"]:
+        raise UpgradeBlocked("superseding report candidate tree binding is invalid")
+    if not isinstance(report["seams"], dict) or not isinstance(report["seams"].get("conflicts"), list):
+        raise UpgradeBlocked("superseding report conflict seams are invalid")
+    report_state = {
+        field: report[field]
+        for field in ("release", "source_commit", "peeled_commit", "tag_object")
+    }
+    report_state["conflicts"] = {"paths": report["seams"]["conflicts"]}
+    _require_merged_ancestry(repository, report_state, report["candidate_head"], repository.root)
+    with _temporary_review_worktree(repository, tag_commit) as worktree:
+        reviewed = verify_current(GitRepository(worktree))
+        if reviewed["lock"]["release"] != release or reviewed["lock"]["peeled_commit"] != report["peeled_commit"]:
+            raise UpgradeBlocked("superseding tag lock does not match report")
+        repository.run_without_hooks(
+            "checkout", "--detach", report["candidate_head"], cwd=worktree,
+            operation="historical report snapshot checkout",
+        )
+        _parse_canonical_success_report(report_state, worktree, contents)
+    return {path: hashlib.sha256(content).hexdigest() for path, content in contents.items()}
+
+
+def supersede_upgrade(repository, tag, expected_commit):
+    """Archive stale state only against an explicitly accepted newer release."""
+    match = REVIEWED_TAG_PATTERN.fullmatch(tag)
+    if not match or not OBJECT_ID_PATTERN.fullmatch(expected_commit):
+        raise UpgradeBlocked("supersede requires a reviewed tag and full expected commit")
+    release = match.group(1)
+    with _UpgradeStorage(repository) as storage:
+        _, state = _load_state(repository, storage, allow_registered_source=True)
+        original = storage.read_state_bytes()
+        current = verify_current(repository)
+        if _release_tuple(release) <= _release_tuple(state["release"]):
+            raise UpgradeBlocked("superseding release must be newer than active upgrade")
+        if current["lock"]["release"] != release:
+            raise UpgradeBlocked("superseding release must match current baseline")
+        tag_object = _reviewed_tag_identity(repository, tag, expected_commit)
+        source_head = repository.run("rev-parse", "HEAD", read_only=True).stdout.strip()
+        if not _is_ancestor(repository, expected_commit, source_head, repository.root):
+            raise UpgradeBlocked("current source does not contain superseding tag")
+        _require_merged_ancestry(repository, state, expected_commit, repository.root)
+        reports = _verify_superseding_report(repository, expected_commit, release)
+        # Recheck mutable references and state after the snapshot validation.
+        if _reviewed_tag_identity(repository, tag, expected_commit) != tag_object:
+            raise UpgradeBlocked("superseding tag changed during validation")
+        verify_current(repository)
+        if repository.run("rev-parse", "HEAD", read_only=True).stdout.strip() != source_head:
+            raise UpgradeBlocked("source HEAD changed during supersede validation")
+        if storage.read_state_bytes() != original:
+            raise UpgradeBlocked("active state changed during supersede validation")
+        receipt = {
+            "schema_version": 1,
+            "status": "SUPERSEDED",
+            "original_state_sha256": hashlib.sha256(original).hexdigest(),
+            "release": state["release"],
+            "superseding_tag": tag,
+            "superseding_tag_object": tag_object,
+            "superseding_commit": expected_commit,
+            "source_head": source_head,
+            "report_content_sha256": reports,
+        }
+        name = f"superseded-{state['release']}.receipt.json"
+        content = _canonical_json_bytes(receipt)
+        try:
+            existing, _ = _read_regular_at(storage.directory_fd, name)
+        except FileNotFoundError:
+            _atomic_write_at(storage.directory_fd, name, content)
+            os.fsync(storage.directory_fd)
+        else:
+            # A crash before the final rename may leave only the receipt.
+            if existing != content:
+                raise UpgradeBlocked("superseded receipt already exists with different evidence")
+        return storage.archive_state(state, prefix="superseded")
 
 
 def _write_state(storage, state):
@@ -2266,7 +2416,7 @@ def _validate_hash_mapping(values, expected_keys, pattern, label):
         raise UpgradeBlocked(f"upgrade state {label} is invalid")
 
 
-def _load_state(repository, storage):
+def _load_state(repository, storage, *, allow_registered_source=False):
     path = storage.state_path
     try:
         raw_state = storage.read_state_bytes().decode("utf-8")
@@ -2382,7 +2532,31 @@ def _load_state(repository, storage):
         raise UpgradeBlocked("upgrade state worktree must be absolute")
     expected_worktree = _upgrade_worktree_path(repository, state["release"])
     if Path(state["worktree"]).resolve() != expected_worktree:
-        raise UpgradeBlocked("upgrade state worktree path is inconsistent")
+        # Supersede may run from a new clean checkout while retaining a stale
+        # candidate owned by another registered source checkout in this repo.
+        recorded_worktree = Path(state["worktree"])
+        source_root = recorded_worktree.parent.parent
+        registrations = [
+            entry for entry in _registered_worktrees(repository)
+            if isinstance(entry.get("worktree"), str)
+            and Path(entry["worktree"]) == source_root
+            and entry.get("branch") == f"refs/heads/{state['source_branch']}"
+        ] if allow_registered_source else []
+        canonical_worktree = source_root / ".worktrees" / f"upgrade-{state['release']}"
+        if (
+            not registrations
+            or recorded_worktree != canonical_worktree
+            or recorded_worktree != recorded_worktree.resolve()
+        ):
+            raise UpgradeBlocked("upgrade state worktree path is inconsistent")
+        # A prunable registration still binds a vanished source to this common
+        # directory and its original branch. Never prune it or recreate paths.
+        if not any(entry.get("prunable") for entry in registrations):
+            source_repository = GitRepository(source_root)
+            if _git_common_directory(source_repository) != _git_common_directory(repository):
+                raise UpgradeBlocked("upgrade state source common directory is inconsistent")
+            if recorded_worktree != _upgrade_worktree_path(source_repository, state["release"]):
+                raise UpgradeBlocked("upgrade state worktree path is inconsistent")
     return path, state
 
 
@@ -2539,8 +2713,87 @@ def _source_configuration_documents(repository, state, worktree):
     }
 
 
+
+def _reviewed_test_ownership_manifest(repository, state, worktree):
+    """Apply only committed, blob-bound frontend test ownership additions."""
+    source = _source_configuration_documents(repository, state, worktree)
+    manifest = source["customization"]
+    paths = _configuration_paths(GitRepository(worktree))
+    current = load_json_document(paths["customization"])
+    validate_manifest(current, [])
+    original = set(manifest["integration_adapter"]["paths"])
+    additions = set(current["integration_adapter"]["paths"]) - original - set(
+        _validation_report_relative_paths(state["release"])
+    )
+    if not additions:
+        return manifest
+    pattern = re.compile(r"^frontend/src/(?:[^/]+/)*__tests__/[^/]+\.spec\.ts$")
+    for path in sorted(additions):
+        _validate_repo_paths("reviewed test ownership", [path])
+        if not pattern.fullmatch(path):
+            raise UpgradeBlocked("ownership registration is limited to frontend test fixtures")
+    head = repository.run("rev-parse", "HEAD", cwd=worktree, read_only=True).stdout.strip()
+    changed = set(_summary_paths(_git_change_summary(
+        repository, state["peeled_commit"], head, worktree
+    )))
+    if not additions.issubset(changed):
+        raise UpgradeBlocked("registered test must differ from the target upstream tree")
+    commits = repository.run(
+        "log", "--reverse", "--format=%H", f"{state['source_commit']}..{head}",
+        "--", BASELINE_CONFIGURATION_PATHS["customization"],
+        cwd=worktree, read_only=True,
+    ).stdout.splitlines()
+    remaining = set(additions)
+    for commit in commits:
+        recorded = _load_json_bytes(repository.read_blob_bytes(
+            commit, BASELINE_CONFIGURATION_PATHS["customization"], cwd=worktree
+        ), "test ownership registration")
+        validate_manifest(recorded, [])
+        recorded_paths = set(recorded["integration_adapter"]["paths"])
+        introduced = remaining & recorded_paths
+        if not introduced:
+            continue
+        registered = recorded_paths - original
+        expected = json.loads(json.dumps(manifest))
+        expected["integration_adapter"]["paths"] = sorted(original | registered)
+        if recorded != expected or any(not pattern.fullmatch(path) for path in registered):
+            raise UpgradeBlocked("test registration changed non-additive ownership configuration")
+        for name, relative in BASELINE_CONFIGURATION_PATHS.items():
+            if name != "customization" and repository.read_blob_bytes(
+                commit, relative, cwd=worktree
+            ) != repository.read_blob_bytes(state["source_commit"], relative, cwd=worktree):
+                raise UpgradeBlocked("test registration changed protected source configuration")
+        for path in introduced:
+            approved = _tree_regular_file(repository, commit, path, worktree)
+            actual = _tree_regular_file(repository, head, path, worktree)
+            if approved is None or approved[0] != "100644" or actual != approved:
+                raise UpgradeBlocked(f"registered test blob changed or is unsafe: {path}")
+        remaining -= introduced
+        if not remaining:
+            break
+    if remaining:
+        raise UpgradeBlocked("test ownership addition has no committed registration")
+    overlay = json.loads(json.dumps(manifest))
+    overlay["integration_adapter"]["paths"] = sorted(original | additions)
+    validate_manifest(overlay, [
+        path for layer in OWNER_LAYER_KEYS for path in overlay[layer]["paths"]
+    ])
+    return overlay
+
+
+def _candidate_source_configuration_hashes(repository, state, worktree):
+    hashes = _source_configuration_hashes(repository, state["source_commit"], worktree)
+    source_manifest = _source_configuration_documents(repository, state, worktree)["customization"]
+    overlay = _reviewed_test_ownership_manifest(repository, state, worktree)
+    if overlay != source_manifest:
+        hashes["customization"] = hashlib.sha256(_canonical_json_bytes(overlay)).hexdigest()
+    return hashes
+
+
 def _reconciled_manifest(repository, state, worktree, source_manifest):
     manifest = json.loads(json.dumps(source_manifest))
+    overlay = _reviewed_test_ownership_manifest(repository, state, worktree)
+    manifest["integration_adapter"]["paths"] = overlay["integration_adapter"]["paths"]
     report_paths = set(_validation_report_relative_paths(state["release"]))
     current_changes = _git_change_summary(
         repository,
@@ -2782,6 +3035,12 @@ def _validate_advanced_baseline(repository, state, worktree):
     expected_paths = set(_summary_paths(changes)) | set(
         _validation_report_relative_paths(state["release"])
     )
+    source_manifest = _source_configuration_documents(repository, state, worktree)["customization"]
+    overlay = _reviewed_test_ownership_manifest(repository, state, worktree)
+    if overlay != source_manifest and manifest != _reconciled_manifest(
+        repository, state, worktree, source_manifest
+    ):
+        raise UpgradeBlocked("registered test baseline changed protected ownership configuration")
     ownership = validate_manifest(manifest, sorted(expected_paths), require_exact=True)
     return {
         "changed": sorted(expected_paths),
@@ -3134,8 +3393,8 @@ def _upgrade_audit_context(
     candidate_configuration_hashes = {
         name: _raw_sha256(path) for name, path in sorted(candidate_paths.items())
     }
-    if require_source_configuration and candidate_configuration_hashes != _source_configuration_hashes(
-        repository, state["source_commit"], worktree
+    if require_source_configuration and candidate_configuration_hashes != _candidate_source_configuration_hashes(
+        repository, state, worktree
     ):
         raise UpgradeBlocked("candidate configuration differs from source commit")
     for ancestor, descendant, label in (
@@ -3352,8 +3611,8 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
         current_hashes = {
             name: _raw_sha256(path) for name, path in sorted(paths.items())
         }
-        source_hashes = _source_configuration_hashes(
-            repository, state["source_commit"], worktree
+        source_hashes = _candidate_source_configuration_hashes(
+            repository, state, worktree
         )
         baseline_already_advanced = current_hashes != source_hashes
         if baseline_already_advanced:
@@ -3479,11 +3738,12 @@ def validate_upgrade_candidate(repository, storage, state, worktree):
             )
         generated_paths = manifest["generated"]["paths"]
         diff_arguments = ["diff", "--exit-code", "--", *generated_paths]
-        generated_diff = repository.run(
-            *diff_arguments, cwd=worktree, check=False, read_only=True
-        )
-        if generated_diff.returncode != 0:
-            raise UpgradeBlocked("generated paths changed after regeneration")
+        if generated_paths:
+            generated_diff = repository.run(
+                *diff_arguments, cwd=worktree, check=False, read_only=True
+            )
+            if generated_diff.returncode != 0:
+                raise UpgradeBlocked("generated paths changed after regeneration")
         report["generated"] = {
             "paths": generated_paths,
             "status": "PASS",
@@ -3569,7 +3829,7 @@ def _recover_incomplete_baseline(repository, storage, state, worktree):
     ).stdout.strip()
     expected_hashes = pending["configuration_hashes"]
     source_hashes = _source_configuration_hashes(
-        repository, state["source_commit"], worktree
+        repository, pending["pre_head"], worktree
     )
     current_paths = _configuration_paths(GitRepository(worktree))
     current_hashes = {
@@ -3594,7 +3854,7 @@ def _recover_incomplete_baseline(repository, storage, state, worktree):
             )
         for name, relative_path in sorted(BASELINE_CONFIGURATION_PATHS.items()):
             content = repository.read_blob_bytes(
-                state["source_commit"], relative_path, cwd=worktree
+                pending["pre_head"], relative_path, cwd=worktree
             )
             _atomic_write_configuration(
                 worktree, PurePosixPath(relative_path).name, content
@@ -3854,7 +4114,10 @@ def _require_recorded_conflicts(repository, state, worktree):
     if _raw_sha256(paths["customization"]) != conflicts["customization_sha256"]:
         if state["phase"] != "validating":
             raise UpgradeBlocked("customization changed after merge conflict capture")
-        _validate_advanced_baseline(repository, state, worktree)
+        expected = _candidate_source_configuration_hashes(repository, state, worktree)
+        current = {name: _raw_sha256(path) for name, path in sorted(paths.items())}
+        if current != expected:
+            _validate_advanced_baseline(repository, state, worktree)
     validate_manifest(
         source_manifest,
         [
@@ -4154,6 +4417,62 @@ def _require_clean_candidate(repository, worktree):
     ).stdout
     if status:
         raise UpgradeBlocked("candidate working tree must be clean")
+
+
+def revalidate_upgrade(repository):
+    """Validate committed repairs while retaining the previous report in Git history."""
+    verify_current(repository, check_ownership=False)
+    with _UpgradeStorage(repository) as storage:
+        _, state = _load_state(repository, storage)
+        if state["phase"] != "merged":
+            raise UpgradeBlocked("revalidate requires a completed merged candidate; use --continue")
+        identity = _source_identity(repository)
+        if identity[0] != state["source_commit"]:
+            raise UpgradeBlocked("source HEAD changed since upgrade state was created")
+        verify_current(repository, ownership_commit=state["source_commit"])
+        worktree = _validate_resume_state(repository, state, source_identity=identity)
+        _require_clean_candidate(repository, worktree)
+        head, _, _, hashes = _candidate_binding(repository, worktree)
+        previous = state["evidence"]["candidate_head"]
+        if head == previous or not _is_ancestor(repository, previous, head, worktree):
+            raise UpgradeBlocked("revalidate requires a new descendant of the recorded evidence commit")
+        # Validate the old PASS at its own immutable commit, never against the repair.
+        # Its complete report remains reachable as a required ancestor of the repair.
+        with _temporary_review_worktree(repository, previous) as historical:
+            # Git stores 100644, not the report writer's private 0600 mode.
+            # Normalize only this owned snapshot, after no-follow path checks.
+            descriptors = []
+            try:
+                descriptors.append(os.open(historical, _directory_flags()))
+                for name in (".steadflow", "reports"):
+                    descriptors.append(_open_child_directory(descriptors[-1], name, name))
+                for path in _validation_report_relative_paths(state["release"]):
+                    descriptor = os.open(
+                        Path(path).name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                        dir_fd=descriptors[-1],
+                    )
+                    try:
+                        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                            raise UpgradeBlocked("historical report must be a regular file")
+                        os.fchmod(descriptor, 0o600)
+                    finally:
+                        os.close(descriptor)
+            finally:
+                for descriptor in reversed(descriptors):
+                    os.close(descriptor)
+            _require_success_report(repository, state, historical)
+        if hashes != state["evidence"]["configuration_hashes"]:
+            raise UpgradeBlocked("revalidate cannot change certified configuration")
+        validation_state = {**state, "phase": "validating"}
+        _require_recorded_conflicts(repository, validation_state, worktree)
+        _validate_advanced_baseline(repository, state, worktree)
+        # Snapshot inspection may take time. Reject concurrent changes before the
+        # existing atomic validating transition; ordinary --continue handles crashes.
+        _validate_resume_state(repository, state, source_identity=_source_identity(repository))
+        _require_clean_candidate(repository, worktree)
+        if _candidate_binding(repository, worktree)[0] != head:
+            raise UpgradeBlocked("candidate HEAD changed during revalidation preparation")
+        return _run_and_persist_candidate_validation(repository, storage, state, worktree)
 
 
 def resume_upgrade(repository):

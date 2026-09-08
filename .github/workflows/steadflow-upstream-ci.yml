@@ -28,6 +28,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Configure read-only official upstream
+        run: git remote add upstream https://github.com/Wei-Shaw/sub2api.git
+
       - name: Detect upstream-sync tooling changes
         id: tooling
         env:

@@ -284,7 +284,9 @@
     "backend/migrations/233_add_usage_log_upstream_request_id_index_notx.sql": "41c32a383794730d2bfd88514bf999cfb156cb06324c46b54642736ac8f2fff6",
     "backend/migrations/233_group_free_openai_fast.sql": "aff8cc2ca0b370a7dca32c21eda22ae8c07d35db5b229e2681faab02e1eac72c",
     "backend/migrations/234_channel_max_reasoning_effort_multiplier.sql": "448b59b3168fe4dfe2417f1abd9657d124708c279e2245d55149087838d8c8d6",
-    "backend/migrations/234_group_codex_models_manifest_config.sql": "8ef9cd9a6a963e79823f8f5d703a6b31fa30ebfca9f8d2337dd451765178e5a0"
+    "backend/migrations/234_group_codex_models_manifest_config.sql": "8ef9cd9a6a963e79823f8f5d703a6b31fa30ebfca9f8d2337dd451765178e5a0",
+    "backend/migrations/235_group_model_allowlist.sql": "4959c4e24a504d0d8fa1345137c1a3715adc6572477dec7a318cf453b4321f9d",
+    "backend/migrations/236_group_model_allowlist_repair.sql": "752809cf1d3812ce241606ba8b015dac48bd6c04ab1cde9ef204d138cffb1025"
   },
   "schema_version": 1
 }

@@ -237,6 +237,8 @@
       ".steadflow/reports/v0.2.0.md",
       ".steadflow/reports/v0.2.1.json",
       ".steadflow/reports/v0.2.1.md",
+      ".steadflow/reports/v0.2.3.json",
+      ".steadflow/reports/v0.2.3.md",
       ".steadflow/upstream-lock.json",
       "DEV_GUIDE.md",
       "Dockerfile",

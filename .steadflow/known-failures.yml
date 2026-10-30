@@ -5,8 +5,8 @@
       "pnpm --dir frontend exec vitest run --reporter=json --outputFile=../.steadflow/work/v0.2.3-vitest.json"
     ],
     "evidence": {
-      "go_json_sha256": "24380045549ef05a3618b299d4953c938f515e0c92058a4d9e1b0c58bf15dfe6",
-      "vitest_json_sha256": "1047b0c28c5322d7f62e6917f9b0db6f9099ad11f8cc1c0a01182cea1b12ee80"
+      "go_json_sha256": "29a4414bb5383987183067ba4ad673277253f855be21318823f7e276518ca6f6",
+      "vitest_json_sha256": "0408c8d37c8dee1ce1908fe6afc94770ca6c752e3302d6e510cdee4e98cd851b"
     },
     "historical_observation": "Certified v0.2.3 full Go and Vitest run; exact allowed failures, if any, remain governed by entries.",
     "release": "v0.2.3",

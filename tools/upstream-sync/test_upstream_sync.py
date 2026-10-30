@@ -3842,6 +3842,17 @@ class UpgradeCandidateValidationTests(unittest.TestCase):
             / f"{self.release}.json"
         )
 
+    def test_same_upstream_revision_certifies_without_changing_locked_release(self):
+        state = create_upgrade_candidate(self.fixture.repository(), self.fixture.current_release)
+        self.assertEqual(state["phase"], "merged")
+        worktree = Path(state["worktree"])
+        lock = json.loads((worktree / ".steadflow/upstream-lock.json").read_text())
+        self.assertEqual(lock["release"], self.fixture.current_release)
+        report = json.loads((worktree / ".steadflow/reports" / (self.fixture.current_release + ".json")).read_text())
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["generated"]["status"], "PASS")
+        self.assertTrue(report["critical_commands"])
+
     def test_clean_merge_runs_all_validation_stages_before_phase_merged(self):
         repository = self.fixture.repository()
         calls = []

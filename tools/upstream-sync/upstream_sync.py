@@ -2970,12 +2970,14 @@ def _commit_or_reuse_advanced_baseline(
         ).stdout.split("\0")
         if path
     )
+    # A same-upstream maintenance revision can leave the lock and ownership
+    # byte-identical. Require exactly the changes computed from trusted blobs,
+    # rather than requiring unchanged files to appear in git diff.
     required = {
-        BASELINE_CONFIGURATION_PATHS["customization"],
-        BASELINE_CONFIGURATION_PATHS["known_failures"],
-        BASELINE_CONFIGURATION_PATHS["lock"],
+        path for path, content in canonical.items()
+        if repository.read_blob_bytes(pre_head, path, cwd=worktree) != content
     }
-    if not required.issubset(staged) or not set(staged).issubset(canonical):
+    if set(staged) != required:
         raise UpgradeBlocked("candidate baseline staging changed unexpected paths")
     _upgrade_test_hook(repository, "after_baseline_index", state=state)
     validated_date = repository.run(

@@ -4,17 +4,19 @@
 // 关键点：
 //   - 幂等：webhook 重放不重复创建
 //   - 下单阶段先创建为 inactive，避免未履约用户登录
-//   - 自动发货成功后由 UserAPIKeyService 激活，再走「忘记密码 → 重置密码」设置登录密码
+//   - 自动发货成功后由 UserAPIKeyService 激活，使用交付邮件中的独立初始密码登录
 package distributor
 
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+
+	"golang.org/x/crypto/bcrypt"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -34,17 +36,27 @@ func NewShadowUserService(db *dbent.Client, logger *slog.Logger) *ShadowUserServ
 	return &ShadowUserService{db: db, logger: logger}
 }
 
+type initialLoginOptions struct {
+	OrderRef string
+	Encrypt  func(string) (string, error)
+}
+
+type initialLoginCredential struct {
+	OrderRef string `json:"orderRef"`
+	Password string `json:"password"`
+}
+
 // EnsureOrderUser 基于 email 兜底创建 shadow user（幂等）。
 //
 // 流程（v2.2 §4.3.3）：
 //  1. SELECT users WHERE email=? AND deleted_at IS NULL
 //  2. 命中 → 返回 userID（幂等）
-//  3. 未命中 → INSERT (email, password_hash=random_hash, status='inactive')
+//  3. 未命中 → INSERT (email, password_hash=bcrypt(random_password), status='inactive')
 //  4. 写 audit_log: shadow_user_created_by=distributor
 //  5. 返回 userID
 //
 // 返回：userID（int64），isNewlyCreated（bool）
-func (s *ShadowUserService) EnsureOrderUser(ctx context.Context, email string) (int64, bool, error) {
+func (s *ShadowUserService) EnsureOrderUser(ctx context.Context, email string, options ...initialLoginOptions) (int64, bool, error) {
 	if email == "" {
 		return 0, false, errors.New("email required")
 	}
@@ -67,11 +79,26 @@ func (s *ShadowUserService) EnsureOrderUser(ctx context.Context, email string) (
 		return 0, false, fmt.Errorf("query existing user: %w", err)
 	}
 
-	// 2. 兜底创建（inactive + 随机密码 hash）。
-	// 自动发货成功后，UserAPIKeyService 会激活用户并写入实际可用的 api_keys。
-	// 随机 32 字节 → sha256(plaintext) 存到 password_hash，避免明文长度溢出。
-	plaintext := generateRandomPassword(32)
-	passwordHash := sha256Hex(plaintext)
+	// New accounts receive a cryptographically random password; existing accounts are never changed.
+	plaintext, err := generateRandomPassword(16)
+	if err != nil {
+		return 0, false, err
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+	if err != nil {
+		return 0, false, fmt.Errorf("hash initial password: %w", err)
+	}
+	encrypted := ""
+	if len(options) > 0 {
+		data, err := json.Marshal(initialLoginCredential{OrderRef: options[0].OrderRef, Password: plaintext})
+		if err != nil {
+			return 0, false, err
+		}
+		encrypted, err = options[0].Encrypt(string(data))
+		if err != nil {
+			return 0, false, fmt.Errorf("encrypt initial password: %w", err)
+		}
+	}
 	username := "shadow_" + hex.EncodeToString([]byte(email)[:minInt(8, len(email))])
 	// 上 username 长度限制（DB schema 通常 64 字符）
 	if len(username) > 60 {
@@ -81,11 +108,16 @@ func (s *ShadowUserService) EnsureOrderUser(ctx context.Context, email string) (
 	created, err := s.db.User.Create().
 		SetUsername(username).
 		SetEmail(email).
-		SetPasswordHash(passwordHash). // 随机 hash，用户需通过忘记密码设置登录密码
-		SetStatus("inactive").         // 下单兜底阶段保持 inactive，发货成功后激活
+		SetPasswordHash(string(passwordHash)).
+		SetDistributorLoginEncrypted(encrypted).
+		SetStatus("inactive"). // 下单兜底阶段保持 inactive，发货成功后激活
 		SetNotes("created_by=distributor (site BFF)").
 		Save(ctx)
 	if err != nil {
+		// A concurrent purchase may have created the same email first. Reuse it without changing its password.
+		if existing, lookupErr := s.db.User.Query().Where(user.EmailEQ(email), user.DeletedAtIsNil()).Only(ctx); lookupErr == nil {
+			return existing.ID, false, nil
+		}
 		return 0, false, fmt.Errorf("create shadow user: %w", err)
 	}
 
@@ -99,21 +131,13 @@ func (s *ShadowUserService) EnsureOrderUser(ctx context.Context, email string) (
 	return int64(created.ID), true, nil
 }
 
-// generateRandomPassword 生成 32 字节随机密码（hex 编码，64 字符）。
-// 用于 shadow user 兜底创建：密码随机 hash，用户无法直接登录。
-func generateRandomPassword(n int) string {
+// Entropy failure must fail closed, never fall back to a predictable password.
+func generateRandomPassword(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		// 极端情况：用时间戳作为 fallback（不应发生）
-		return fmt.Sprintf("shadow_fallback_%d", n)
+		return "", fmt.Errorf("generate initial password: %w", err)
 	}
-	return hex.EncodeToString(b)
-}
-
-// sha256Hex 返回 64 字符 hex（与 User.password_hash 字段长度匹配）。
-func sha256Hex(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
+	return hex.EncodeToString(b), nil
 }
 
 func minInt(a, b int) int {

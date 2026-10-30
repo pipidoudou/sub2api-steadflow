@@ -19,7 +19,9 @@ package distributor
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"strings"
 	"testing"
 
@@ -95,9 +97,8 @@ func TestEnsureOrderUser_NewEmail_CreatesShadowUser(t *testing.T) {
 	if got.Email != email {
 		t.Fatalf("expected email=%q, got %q", email, got.Email)
 	}
-	// shadow user 必须有 password_hash（随机 32 字节 sha256 → 64 hex）
-	if len(got.PasswordHash) != 64 {
-		t.Fatalf("expected password_hash length=64 (sha256 hex), got %d", len(got.PasswordHash))
+	if _, err := bcrypt.Cost([]byte(got.PasswordHash)); err != nil {
+		t.Fatalf("expected bcrypt hash: %v", err)
 	}
 	// username 必须是 "shadow_" 前缀
 	if !strings.HasPrefix(got.Username, "shadow_") {
@@ -251,3 +252,72 @@ func TestEnsureOrderUser_NotFoundOnMissingEmail_TriggersCreate(t *testing.T) {
 
 // 编译期校验：包内引用，防止 import 漂移。
 var _ = dbent.IsNotFound
+
+func TestInitialLoginCredentialDelivery(t *testing.T) {
+	ctx := context.Background()
+	client := newShadowUserTestClient(t)
+	shadow := NewShadowUserService(client, nil)
+	keys, err := NewUserAPIKeyService(client, nil, strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders := NewDistributorOrderService(client, shadow, keys, nil, nil)
+	id, _, err := shadow.EnsureOrderUser(ctx, "new@example.com", initialLoginOptions{OrderRef: "7:first", Encrypt: keys.encrypt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := client.User.Get(ctx, id)
+	encrypted := u.DistributorLoginEncrypted
+	serialized, _ := json.Marshal(u)
+	if strings.Contains(string(serialized), encrypted) {
+		t.Fatal("encrypted credential exposed in user JSON")
+	}
+	if _, err := client.User.UpdateOneID(id).SetStatus("active").Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+	distributorID := int64(7)
+	order := &dbent.PaymentOrder{UserID: id, DistributorID: &distributorID, OutTradeNo: "first"}
+	password, err := orders.InitialLoginPassword(ctx, order)
+	if err != nil || len(password) != 32 {
+		t.Fatalf("missing initial password: %v", err)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		t.Fatal("delivered password cannot authenticate")
+	}
+	if strings.Contains(encrypted, password) {
+		t.Fatal("plaintext stored")
+	}
+	// Retry account creation and mail retrieval; never rotate the credential.
+	_, created, err := shadow.EnsureOrderUser(ctx, "new@example.com", initialLoginOptions{OrderRef: "7:first", Encrypt: keys.encrypt})
+	if err != nil || created {
+		t.Fatal("retry created account")
+	}
+	again, err := orders.InitialLoginPassword(ctx, order)
+	if err != nil || again != password {
+		t.Fatal("retry changed password")
+	}
+	order.OutTradeNo = "renewal"
+	if p, err := orders.InitialLoginPassword(ctx, order); err != nil || p != "" {
+		t.Fatal("renewal disclosed original password")
+	}
+	order.OutTradeNo = "first"
+	other := int64(8)
+	order.DistributorID = &other
+	if p, err := orders.InitialLoginPassword(ctx, order); err != nil || p != "" {
+		t.Fatal("other distributor disclosed password")
+	}
+	order.DistributorID = &distributorID
+	changed, _ := bcrypt.GenerateFromPassword([]byte("UserChangedPassword123"), bcrypt.DefaultCost)
+	client.User.UpdateOneID(id).SetPasswordHash(string(changed)).SaveX(ctx)
+	if p, err := orders.InitialLoginPassword(ctx, order); err != nil || p != "" {
+		t.Fatal("old password sent after user changed it")
+	}
+	_, _, err = shadow.EnsureOrderUser(ctx, "new@example.com", initialLoginOptions{OrderRef: "7:renewal", Encrypt: keys.encrypt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := client.User.GetX(ctx, id)
+	if updated.PasswordHash != string(changed) {
+		t.Fatal("existing password overwritten")
+	}
+}

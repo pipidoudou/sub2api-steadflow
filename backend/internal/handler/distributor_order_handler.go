@@ -129,7 +129,14 @@ func (h *DistributorHandler) HandleOrderByID(w http.ResponseWriter, r *http.Requ
 			break
 		}
 	}
+	initialPassword, err := h.orderService.InitialLoginPassword(r.Context(), order)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "LOGIN_CREDENTIAL_UNAVAILABLE")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	response := map[string]any{
+		"initial_password":  initialPassword,
 		"supplier_order_id": supplierOrderID,
 		"status":            strings.ToLower(order.Status),
 		"shadow_user_id":    order.UserID,

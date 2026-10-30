@@ -88,6 +88,20 @@ func (_c *UserCreate) SetPasswordHash(v string) *UserCreate {
 	return _c
 }
 
+// SetDistributorLoginEncrypted sets the "distributor_login_encrypted" field.
+func (_c *UserCreate) SetDistributorLoginEncrypted(v string) *UserCreate {
+	_c.mutation.SetDistributorLoginEncrypted(v)
+	return _c
+}
+
+// SetNillableDistributorLoginEncrypted sets the "distributor_login_encrypted" field if the given value is not nil.
+func (_c *UserCreate) SetNillableDistributorLoginEncrypted(v *string) *UserCreate {
+	if v != nil {
+		_c.SetDistributorLoginEncrypted(*v)
+	}
+	return _c
+}
+
 // SetRole sets the "role" field.
 func (_c *UserCreate) SetRole(v string) *UserCreate {
 	_c.mutation.SetRole(v)
@@ -813,6 +827,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 		_node.PasswordHash = value
 	}
+	if value, ok := _c.mutation.DistributorLoginEncrypted(); ok {
+		_spec.SetField(user.FieldDistributorLoginEncrypted, field.TypeString, value)
+		_node.DistributorLoginEncrypted = value
+	}
 	if value, ok := _c.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 		_node.Role = value
@@ -1208,6 +1226,24 @@ func (u *UserUpsert) SetPasswordHash(v string) *UserUpsert {
 // UpdatePasswordHash sets the "password_hash" field to the value that was provided on create.
 func (u *UserUpsert) UpdatePasswordHash() *UserUpsert {
 	u.SetExcluded(user.FieldPasswordHash)
+	return u
+}
+
+// SetDistributorLoginEncrypted sets the "distributor_login_encrypted" field.
+func (u *UserUpsert) SetDistributorLoginEncrypted(v string) *UserUpsert {
+	u.Set(user.FieldDistributorLoginEncrypted, v)
+	return u
+}
+
+// UpdateDistributorLoginEncrypted sets the "distributor_login_encrypted" field to the value that was provided on create.
+func (u *UserUpsert) UpdateDistributorLoginEncrypted() *UserUpsert {
+	u.SetExcluded(user.FieldDistributorLoginEncrypted)
+	return u
+}
+
+// ClearDistributorLoginEncrypted clears the value of the "distributor_login_encrypted" field.
+func (u *UserUpsert) ClearDistributorLoginEncrypted() *UserUpsert {
+	u.SetNull(user.FieldDistributorLoginEncrypted)
 	return u
 }
 
@@ -1622,6 +1658,27 @@ func (u *UserUpsertOne) SetPasswordHash(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdatePasswordHash() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePasswordHash()
+	})
+}
+
+// SetDistributorLoginEncrypted sets the "distributor_login_encrypted" field.
+func (u *UserUpsertOne) SetDistributorLoginEncrypted(v string) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetDistributorLoginEncrypted(v)
+	})
+}
+
+// UpdateDistributorLoginEncrypted sets the "distributor_login_encrypted" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateDistributorLoginEncrypted() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateDistributorLoginEncrypted()
+	})
+}
+
+// ClearDistributorLoginEncrypted clears the value of the "distributor_login_encrypted" field.
+func (u *UserUpsertOne) ClearDistributorLoginEncrypted() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearDistributorLoginEncrypted()
 	})
 }
 
@@ -2253,6 +2310,27 @@ func (u *UserUpsertBulk) SetPasswordHash(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdatePasswordHash() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePasswordHash()
+	})
+}
+
+// SetDistributorLoginEncrypted sets the "distributor_login_encrypted" field.
+func (u *UserUpsertBulk) SetDistributorLoginEncrypted(v string) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetDistributorLoginEncrypted(v)
+	})
+}
+
+// UpdateDistributorLoginEncrypted sets the "distributor_login_encrypted" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateDistributorLoginEncrypted() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateDistributorLoginEncrypted()
+	})
+}
+
+// ClearDistributorLoginEncrypted clears the value of the "distributor_login_encrypted" field.
+func (u *UserUpsertBulk) ClearDistributorLoginEncrypted() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearDistributorLoginEncrypted()
 	})
 }
 

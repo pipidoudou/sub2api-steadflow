@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 )
@@ -138,7 +140,7 @@ func (s *DistributorOrderService) CreateOrder(ctx context.Context, req CreateDis
 	}
 
 	// 1. 兜底创建 shadow user（幂等）
-	userID, isNew, err := s.shadowService.EnsureOrderUser(ctx, req.Email)
+	userID, isNew, err := s.shadowService.EnsureOrderUser(ctx, req.Email, initialLoginOptions{OrderRef: fmt.Sprintf("%d:%s", req.DistributorID, req.ExternalOrderID), Encrypt: s.apiKeyService.encrypt})
 	if err != nil {
 		return nil, fmt.Errorf("ensure shadow user: %w", err)
 	}
@@ -472,4 +474,35 @@ func maskAPIKey(key string) string {
 		return "***"
 	}
 	return key[:6] + "***" + key[len(key)-4:]
+}
+
+// InitialLoginPassword returns credentials only for the account-creating order, while still valid.
+// Callers must authenticate the distributor and check order ownership before calling.
+func (s *DistributorOrderService) InitialLoginPassword(ctx context.Context, order *dbent.PaymentOrder) (string, error) {
+	u, err := s.db.User.Get(ctx, order.UserID)
+	if err != nil {
+		return "", err
+	}
+	if u.DistributorLoginEncrypted == "" || u.Status != "active" {
+		return "", nil
+	}
+	plain, err := s.apiKeyService.Decrypt(u.DistributorLoginEncrypted)
+	if err != nil {
+		return "", fmt.Errorf("decrypt initial login credential: %w", err)
+	}
+	var credential initialLoginCredential
+	if err := json.Unmarshal([]byte(plain), &credential); err != nil {
+		return "", errors.New("invalid initial login credential")
+	}
+	var distributorID int64
+	if order.DistributorID != nil {
+		distributorID = *order.DistributorID
+	}
+	if credential.OrderRef != fmt.Sprintf("%d:%s", distributorID, order.OutTradeNo) {
+		return "", nil
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(credential.Password)) != nil {
+		return "", nil
+	}
+	return credential.Password, nil
 }

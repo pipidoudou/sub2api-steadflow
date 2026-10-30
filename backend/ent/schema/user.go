@@ -43,6 +43,8 @@ func (User) Fields() []ent.Field {
 		field.String("password_hash").
 			MaxLen(255).
 			NotEmpty(),
+		// Encrypted, order-scoped initial login credential; never exposed in user JSON.
+		field.String("distributor_login_encrypted").Optional().Sensitive(),
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),

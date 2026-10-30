@@ -25,6 +25,8 @@ const (
 	FieldEmail = "email"
 	// FieldPasswordHash holds the string denoting the password_hash field in the database.
 	FieldPasswordHash = "password_hash"
+	// FieldDistributorLoginEncrypted holds the string denoting the distributor_login_encrypted field in the database.
+	FieldDistributorLoginEncrypted = "distributor_login_encrypted"
 	// FieldRole holds the string denoting the role field in the database.
 	FieldRole = "role"
 	// FieldBalance holds the string denoting the balance field in the database.
@@ -201,6 +203,7 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldEmail,
 	FieldPasswordHash,
+	FieldDistributorLoginEncrypted,
 	FieldRole,
 	FieldBalance,
 	FieldFrozenBalance,
@@ -328,6 +331,11 @@ func ByEmail(opts ...sql.OrderTermOption) OrderOption {
 // ByPasswordHash orders the results by the password_hash field.
 func ByPasswordHash(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPasswordHash, opts...).ToFunc()
+}
+
+// ByDistributorLoginEncrypted orders the results by the distributor_login_encrypted field.
+func ByDistributorLoginEncrypted(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDistributorLoginEncrypted, opts...).ToFunc()
 }
 
 // ByRole orders the results by the role field.

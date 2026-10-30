@@ -80,6 +80,11 @@ func PasswordHash(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPasswordHash, v))
 }
 
+// DistributorLoginEncrypted applies equality check predicate on the "distributor_login_encrypted" field. It's identical to DistributorLoginEncryptedEQ.
+func DistributorLoginEncrypted(v string) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldDistributorLoginEncrypted, v))
+}
+
 // Role applies equality check predicate on the "role" field. It's identical to RoleEQ.
 func Role(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
@@ -438,6 +443,81 @@ func PasswordHashEqualFold(v string) predicate.User {
 // PasswordHashContainsFold applies the ContainsFold predicate on the "password_hash" field.
 func PasswordHashContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldPasswordHash, v))
+}
+
+// DistributorLoginEncryptedEQ applies the EQ predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedEQ(v string) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedNEQ applies the NEQ predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedNEQ(v string) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedIn applies the In predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedIn(vs ...string) predicate.User {
+	return predicate.User(sql.FieldIn(FieldDistributorLoginEncrypted, vs...))
+}
+
+// DistributorLoginEncryptedNotIn applies the NotIn predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedNotIn(vs ...string) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldDistributorLoginEncrypted, vs...))
+}
+
+// DistributorLoginEncryptedGT applies the GT predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedGT(v string) predicate.User {
+	return predicate.User(sql.FieldGT(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedGTE applies the GTE predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedGTE(v string) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedLT applies the LT predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedLT(v string) predicate.User {
+	return predicate.User(sql.FieldLT(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedLTE applies the LTE predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedLTE(v string) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedContains applies the Contains predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedContains(v string) predicate.User {
+	return predicate.User(sql.FieldContains(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedHasPrefix applies the HasPrefix predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedHasPrefix(v string) predicate.User {
+	return predicate.User(sql.FieldHasPrefix(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedHasSuffix applies the HasSuffix predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedHasSuffix(v string) predicate.User {
+	return predicate.User(sql.FieldHasSuffix(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedIsNil applies the IsNil predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldDistributorLoginEncrypted))
+}
+
+// DistributorLoginEncryptedNotNil applies the NotNil predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldDistributorLoginEncrypted))
+}
+
+// DistributorLoginEncryptedEqualFold applies the EqualFold predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedEqualFold(v string) predicate.User {
+	return predicate.User(sql.FieldEqualFold(FieldDistributorLoginEncrypted, v))
+}
+
+// DistributorLoginEncryptedContainsFold applies the ContainsFold predicate on the "distributor_login_encrypted" field.
+func DistributorLoginEncryptedContainsFold(v string) predicate.User {
+	return predicate.User(sql.FieldContainsFold(FieldDistributorLoginEncrypted, v))
 }
 
 // RoleEQ applies the EQ predicate on the "role" field.
